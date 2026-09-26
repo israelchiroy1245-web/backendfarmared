@@ -8,7 +8,12 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
-
+import authRoutes from './src/routes/auth.routes.js'
+app.use('/api/auth', authRoutes)
+import ventasRoutes from './src/routes/ventas.routes.js'
+app.use('/api/ventas', ventasRoutes)
+import dashboardRoutes from './src/routes/dashboard.routes.js'
+app.use('/api/dashboard', dashboardRoutes)
 
 //Inicia servidor y base de datos
 async function startServer() {
@@ -16,7 +21,7 @@ async function startServer() {
 
     const PORT = process.env.PORT || 3000;
 
-    app.listen(PORT, () => console.log(`API en http://127.0.0.1:${PORT}`));
+    app.listen(PORT, () => console.log(`API en http://localhost:${PORT}`));
 
 }
 

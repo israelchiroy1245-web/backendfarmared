@@ -1,30 +1,27 @@
-import oracledb from "oracledb";
-import 'dotenv/config';
-
+import oracledb from "oracledb"
+import 'dotenv/config'
 
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.autoCommit = false;
 
+const connectString =
+    process.env.DB_CONNECTION_STRING ||
+    process.env.ORACLE_CONNECT_STRING ||
+    `${process.env.ORACLE_HOST || 'localhost'}:${process.env.ORACLE_PORT || 1521}/${process.env.ORACLE_SERVICE || 'XEPDB1'}`
+
 export async function initializePool() {
     await oracledb.createPool({
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        connectString: process.env.DB_CONNECTION_STRING,
-        poolMin: 2,
-        poolMax: 10,
-        poolIncrement: 2,
-        poolTimeout: 60
-    });
-    console.log("Pool de conexión a Oracle creado exitosamente");
+        user: process.env.DB_USER || 'farmred',
+        password: process.env.DB_PASSWORD || 'farmred',
+        connectString,
+        poolMin: 1,
+        poolMax: 8,
+        poolIncrement: 1,
+    })
 }
 
 export async function closePool() {
-    try {
-        await oracledb.getPool().close(10) // 10 segundos antes de forzar el cierre 
-        console.log('cierre limpio del pool de oracledb');
-    } catch (error) {
-        console.error("Error al cerrar el pool de conexion a oracle:", error.message);
-    }
+    await oracledb.getPool().close(0)
 }
 
-export { oracledb };
+export { oracledb }
