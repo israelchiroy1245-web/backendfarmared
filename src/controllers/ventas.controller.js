@@ -102,7 +102,7 @@ export async function registrarVenta(req, res) {
         const metodoPago = req.body.metodoPago || 'EFECTIVO'
         const montoRecibido = req.body.montoRecibido !== undefined ? num(req.body.montoRecibido) : undefined
 
-        const usuarioId = num(req.usuario?.id ?? req.body.cajeroId ?? process.env.CAJERO_ID_PRUEBA)
+        const usuarioId = num(req.usuario?.id)
 
         if (!sucursalId) {
             return res.status(400).json({ ok: false, error: 'sucursalId es obligatorio' })
@@ -173,7 +173,7 @@ export async function anularVenta(req, res) {
             return res.status(400).json({ ok: false, error: 'ID de venta inválido' })
         }
 
-        const usuarioId = num(req.usuario?.id ?? req.body.cajeroId ?? process.env.CAJERO_ID_PRUEBA)
+        const usuarioId = num(req.usuario?.id)
         if (!usuarioId) {
             return res.status(401).json({ ok: false, error: 'No hay usuario autenticado en la sesión' })
         }
