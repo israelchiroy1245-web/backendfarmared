@@ -4,8 +4,7 @@ import {
     obtenerUsuario,
     crearUsuario,
     actualizarUsuario,
-    cambiarPassword,
-    eliminarUsuario
+    cambiarPassword
 } from '../controllers/usuarios.controller.js'
 import { requireAuth, requireRol } from '../middlewares/auth.js'
 
@@ -19,6 +18,5 @@ router.get('/:id', obtenerUsuario)
 router.post('/', crearUsuario)
 router.put('/:id', actualizarUsuario)
 router.patch('/:id/password', cambiarPassword)
-router.delete('/:id', eliminarUsuario)
 
 export default router
