@@ -187,15 +187,8 @@ export async function cerrarTurno(req, res) {
             return res.status(400).json({ ok: false, error: 'montoContado es obligatorio y debe ser >= 0' })
         }
 
-        const ventasEfectivo = req.body.ventasEfectivo ?? req.body.ventas_efectivo
-        const ventasTarjeta = req.body.ventasTarjeta ?? req.body.ventas_tarjeta
-        const gastos = req.body.gastos
-
         const resultado = await cajaService.cerrarTurno(turnoId, {
             montoContado,
-            ventasEfectivo,
-            ventasTarjeta,
-            gastos,
             usuarioId: (req.usuario || req.user).id
         })
 
