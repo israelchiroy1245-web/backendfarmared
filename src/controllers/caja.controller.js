@@ -44,6 +44,26 @@ export async function listarTurnos(req, res) {
 }
 
 /**
+ * GET /api/caja/abierta
+ * Consulta el turno abierto de la sucursal (o 404 si no hay turno abierto)
+ */
+export async function obtenerTurnoAbierto(req, res) {
+    try {
+        const sucursalId = num(req.query.sucursalId ?? (req.usuario || req.user)?.sucursalId)
+        if (!sucursalId) {
+            return res.status(400).json({ ok: false, error: 'sucursalId es requerido' })
+        }
+        const turno = await cajaService.consultarTurnoAbiertoPorSucursal(sucursalId)
+        if (!turno) {
+            return res.status(404).json({ ok: false, error: `No hay turno de caja abierto para la sucursal ${sucursalId}` })
+        }
+        return res.json({ ok: true, datos: turno })
+    } catch (error) {
+        return fallo(res, error, 'Error al consultar turno abierto de sucursal:')
+    }
+}
+
+/**
  * GET /api/caja/activo
  * Consulta si el cajero en sesión tiene un turno ABIERTO actualmente
  */

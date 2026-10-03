@@ -14,14 +14,19 @@ const router = Router()
 router.use(requireAuth)
 
 // CU03: Consulta en vivo de cobertura, stock, distancia Haversine y ETA
+router.post('/consulta', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO'), consultarCobertura)
 router.post('/consultar', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO'), consultarCobertura)
+
+// Creación de pedidos a domicilio (canal CALL_CENTER)
+router.post('/pedido', requireRol('CALL_CENTER', 'ADMIN'), crearPedido)
+router.post('/', requireRol('CALL_CENTER', 'ADMIN'), crearPedido)
 
 // Consulta de pedidos
 router.get('/', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO'), listarPedidos)
 router.get('/:id', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO'), obtenerPedido)
 
-// Creación y ciclo de vida de pedidos
-router.post('/', requireRol('CALL_CENTER', 'ADMIN'), crearPedido)
+// Actualización del ciclo logístico del pedido
+router.patch('/:id', requireRol('CALL_CENTER', 'ADMIN', 'QF'), cambiarEstadoPedido)
 router.patch('/:id/estado', requireRol('CALL_CENTER', 'ADMIN', 'QF'), cambiarEstadoPedido)
 
 export default router

@@ -1,5 +1,6 @@
 import * as planillaService from '../services/planilla.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
+import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
 
 /**
  * GET /api/planilla
@@ -11,19 +12,25 @@ export async function listarPlanillas(req, res) {
         const sucursalId = num(req.query.sucursalId)
         const estado = req.query.estado
         const empleadoId = num(req.query.empleadoId)
-        const limit = num(req.query.limit) || 50
-        const offset = num(req.query.offset) || 0
+        const { limit, offset } = leerPaginacion(req.query)
 
-        const planillas = await planillaService.consultarPlanillas({
+        const pagina = await planillaService.consultarPlanillas({
             periodo,
             sucursalId,
             estado,
             empleadoId,
+            q: req.query.q,
             limit,
             offset
         })
 
-        return res.json({ ok: true, total: planillas.length, datos: planillas })
+        return res.json({
+            ok: true,
+            datos: pagina.rows,
+            total: pagina.total,
+            resumen: { montoTotal: Number(pagina.metrics?.MONTO ?? 0) },
+            paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
+        })
     } catch (error) {
         console.error('Error al listar planillas:', error.message)
         const err = errorOracle(error)
@@ -71,7 +78,7 @@ export async function generarPlanilla(req, res) {
             periodo,
             sucursalId: num(sucursalId),
             bonificacion: num(bonificacion),
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.status(201).json({ ok: true, ...resultado })
@@ -103,7 +110,7 @@ export async function crearOActualizarPlanilla(req, res) {
             salarioBase: num(salarioBase),
             bonificaciones: num(bonificaciones),
             descuentos: num(descuentos),
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.status(201).json({ ok: true, ...resultado })
@@ -131,7 +138,7 @@ export async function actualizarPlanilla(req, res) {
             bonificaciones,
             descuentos,
             salarioBase,
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.json({ ok: true, ...resultado })
@@ -153,7 +160,7 @@ export async function pagarPlanilla(req, res) {
             return res.status(400).json({ ok: false, error: 'ID de planilla inválido' })
         }
 
-        const resultado = await planillaService.pagarPlanilla(id, (req.usuario || req.user)?.id)
+        const resultado = await planillaService.pagarPlanilla(id, req.usuario?.id)
 
         return res.json({ ok: true, ...resultado })
     } catch (error) {
@@ -177,7 +184,7 @@ export async function pagarPeriodo(req, res) {
         const resultado = await planillaService.pagarPlanillaPeriodo({
             periodo,
             sucursalId: num(sucursalId),
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.json({ ok: true, ...resultado })

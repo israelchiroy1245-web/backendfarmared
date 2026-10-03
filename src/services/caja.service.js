@@ -27,6 +27,7 @@ export async function consultarTurnos({
                 t.Ventas_efectivo AS "VENTAS_EFECTIVO",
                 t.Ventas_tarjeta AS "VENTAS_TARJETA",
                 t.Gastos AS "GASTOS",
+                t.Total_esperado AS "TOTAL_ESPERADO",
                 t.Monto_contado AS "MONTO_CONTADO",
                 t.Diferencia AS "DIFERENCIA",
                 t.Estado AS "ESTADO",
@@ -34,6 +35,8 @@ export async function consultarTurnos({
                 s.Nombre AS "SUCURSAL_NOMBRE",
                 t.F_Empleados_ID AS "EMPLEADO_ID",
                 u.Nombre || ' ' || u.Apellido AS "CAJERO_NOMBRE",
+                t.Cerrado_por AS "CERRADO_POR_ID",
+                uc.Nombre || ' ' || uc.Apellido AS "CERRADO_POR_NOMBRE",
                 t.Auditor AS "AUDITOR_ID",
                 ua.Nombre || ' ' || ua.Apellido AS "AUDITOR_NOMBRE",
                 TO_CHAR(t.Fecha_auditoria, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA_AUDITORIA",
@@ -42,6 +45,8 @@ export async function consultarTurnos({
             JOIN F_Sucursal s ON s.ID = t.F_Sucursal_ID
             JOIN F_Empleados e ON e.ID = t.F_Empleados_ID
             JOIN F_Usuarios u ON u.ID = e.Usuarios_ID
+            LEFT JOIN F_Empleados ec ON ec.ID = t.Cerrado_por
+            LEFT JOIN F_Usuarios uc ON uc.ID = ec.Usuarios_ID
             LEFT JOIN F_Usuarios ua ON ua.ID = t.Auditor
             WHERE 1 = 1
         `
@@ -104,14 +109,18 @@ export async function consultarTurnoPorId(id) {
                 t.Ventas_efectivo AS "VENTAS_EFECTIVO",
                 t.Ventas_tarjeta AS "VENTAS_TARJETA",
                 t.Gastos AS "GASTOS",
+                t.Total_esperado AS "TOTAL_ESPERADO",
                 t.Monto_contado AS "MONTO_CONTADO",
                 t.Diferencia AS "DIFERENCIA",
                 t.Estado AS "ESTADO",
                 t.F_Sucursal_ID AS "SUCURSAL_ID",
                 s.Nombre AS "SUCURSAL_NOMBRE",
+                s.Codigo AS "SUCURSAL_CODIGO",
                 t.F_Empleados_ID AS "EMPLEADO_ID",
                 u.Nombre || ' ' || u.Apellido AS "CAJERO_NOMBRE",
                 u.Email AS "CAJERO_EMAIL",
+                t.Cerrado_por AS "CERRADO_POR_ID",
+                uc.Nombre || ' ' || uc.Apellido AS "CERRADO_POR_NOMBRE",
                 t.Auditor AS "AUDITOR_ID",
                 ua.Nombre || ' ' || ua.Apellido AS "AUDITOR_NOMBRE",
                 TO_CHAR(t.Fecha_auditoria, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA_AUDITORIA"
@@ -119,6 +128,8 @@ export async function consultarTurnoPorId(id) {
             JOIN F_Sucursal s ON s.ID = t.F_Sucursal_ID
             JOIN F_Empleados e ON e.ID = t.F_Empleados_ID
             JOIN F_Usuarios u ON u.ID = e.Usuarios_ID
+            LEFT JOIN F_Empleados ec ON ec.ID = t.Cerrado_por
+            LEFT JOIN F_Usuarios uc ON uc.ID = ec.Usuarios_ID
             LEFT JOIN F_Usuarios ua ON ua.ID = t.Auditor
             WHERE t.ID = :id
         `
@@ -143,6 +154,28 @@ export async function consultarTurnoPorId(id) {
         turno.MOVIMIENTOS = resMovs.rows || []
 
         return turno
+    } finally {
+        if (conn) {
+            try { await conn.close() } catch (_) {}
+        }
+    }
+}
+
+/**
+ * Consulta de turno abierto por sucursal (GET /api/caja/abierta?sucursalId=1)
+ */
+export async function consultarTurnoAbiertoPorSucursal(sucursalId) {
+    let conn
+    try {
+        conn = await oracledb.getConnection()
+        const res = await conn.execute(
+            `SELECT ID FROM F_Turno_caja WHERE F_Sucursal_ID = :suc AND Estado = 'ABIERTA'`,
+            { suc: nbind(sucursalId) }
+        )
+        const id = res.rows?.[0]?.ID
+        if (!id) return null
+
+        return await consultarTurnoPorId(id)
     } finally {
         if (conn) {
             try { await conn.close() } catch (_) {}
@@ -200,6 +233,17 @@ export async function abrirTurno({
         if (monto === null || monto < 0) {
             const err = new Error('El monto inicial debe ser mayor o igual a 0')
             err.statusCode = 400
+            throw err
+        }
+
+        // Validar que la sucursal no tenga ya un turno abierto (Regla: 1 sucursal = 1 turno ABIERTA a la vez)
+        const checkSucursal = await conn.execute(
+            `SELECT ID, F_Empleados_ID FROM F_Turno_caja WHERE F_Sucursal_ID = :suc AND Estado = 'ABIERTA'`,
+            { suc: nbind(sucursalId) }
+        )
+        if (checkSucursal.rows && checkSucursal.rows.length > 0) {
+            const err = new Error(`La sucursal ya tiene un turno de caja abierto (Turno ID #${checkSucursal.rows[0].ID}). Debe cerrarse antes de abrir uno nuevo.`)
+            err.statusCode = 409
             throw err
         }
 
@@ -443,29 +487,36 @@ export async function cerrarTurno(turnoId, {
         const vTarjeta = num(ventasTarjeta) !== null ? num(ventasTarjeta) : (Number(turno.VENTAS_TARJETA) || 0)
         const gsts = num(gastos) !== null ? num(gastos) : (Number(turno.GASTOS) || 0)
 
+        // Obtener ID del empleado que está cerrando
+        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
+
         // Fórmula rectora de arqueo:
         // esperadoEnCaja = inicial + ventas_efectivo - gastos
         // diferencia = contado - esperadoEnCaja
         const esperadoEnCaja = Math.round((inicial + vEfectivo - gsts) * 100) / 100
         const diferencia = Math.round((contado - esperadoEnCaja) * 100) / 100
 
-        // Actualizar turno a CERRADA
+        // Actualizar turno a CERRADA con foto de auditoría
         await conn.execute(
             `UPDATE F_Turno_caja
              SET Monto_contado = :contado,
                  Ventas_efectivo = :vEf,
                  Ventas_tarjeta = :vTarj,
                  Gastos = :gastos,
+                 Total_esperado = :esperado,
                  Diferencia = :dif,
+                 Cerrado_por = :cerrador,
                  Estado = 'CERRADA',
                  Fecha_cierre = SYSTIMESTAMP
-             WHERE ID = :id`,
+             WHERE ID = :id AND Estado = 'ABIERTA'`,
             {
                 contado: nbind(contado),
                 vEf: nbind(vEfectivo),
                 vTarj: nbind(vTarjeta),
                 gastos: nbind(gsts),
+                esperado: nbind(esperadoEnCaja),
                 dif: nbind(diferencia),
+                cerrador: empleadoId ? nbind(empleadoId) : null,
                 id: nbind(turnoId)
             }
         )
@@ -479,9 +530,11 @@ export async function cerrarTurno(turnoId, {
             ventasEfectivo: vEfectivo,
             ventasTarjeta: vTarjeta,
             gastos: gsts,
+            totalEsperado: esperadoEnCaja,
             esperadoEnCaja,
             montoContado: contado,
             diferencia,
+            cerradoPor: empleadoId,
             mensaje: diferencia === 0
                 ? 'Turno cerrado con cuadre exacto (diferencia 0)'
                 : diferencia > 0

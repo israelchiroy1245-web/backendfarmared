@@ -1,30 +1,29 @@
 import * as pedidosService from '../services/pedidos.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
+import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
 
 /**
- * POST /api/call-center/consultar o POST /api/pedidos/consultar
+ * POST /api/call-center/consulta o POST /api/call-center/consultar
  * CU03: Consulta en vivo de disponibilidad de stock, cálculo de distancia Haversine y ETA
  */
 export async function consultarCobertura(req, res) {
     try {
-        const { latitud, longitud, items } = req.body
-
-        if (num(latitud) === null || num(longitud) === null) {
-            return res.status(400).json({ ok: false, error: 'latitud y longitud del cliente son requeridas' })
-        }
-
-        if (!Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ ok: false, error: 'items debe ser un arreglo de medicamentos con cantidad' })
-        }
+        const { latitud, longitud, departamento, depto, items, medicamentos } = req.body
 
         const resultado = await pedidosService.consultarDisponibilidad({
             latitud,
             longitud,
-            items
+            departamento,
+            depto,
+            items,
+            medicamentos
         })
 
         return res.json({ ok: true, ...resultado })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al consultar cobertura de call center:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -33,7 +32,7 @@ export async function consultarCobertura(req, res) {
 
 /**
  * GET /api/pedidos o GET /api/call-center/pedidos
- * Listado de pedidos con filtros por estado, sucursal, cliente y paginación
+ * Listado de pedidos con filtros y paginación estándar
  */
 export async function listarPedidos(req, res) {
     try {
@@ -41,19 +40,24 @@ export async function listarPedidos(req, res) {
         const sucursalId = num(req.query.sucursalId)
         const clienteId = num(req.query.clienteId)
         const canal = req.query.canal
-        const limit = num(req.query.limit) || 50
-        const offset = num(req.query.offset) || 0
+        const { limit, offset } = leerPaginacion(req.query)
 
-        const pedidos = await pedidosService.consultarPedidos({
+        const pagina = await pedidosService.consultarPedidos({
             estado,
             sucursalId,
             clienteId,
             canal,
+            q: req.query.q,
             limit,
             offset
         })
 
-        return res.json({ ok: true, total: pedidos.length, datos: pedidos })
+        return res.json({
+            ok: true,
+            datos: pagina.rows,
+            total: pagina.total,
+            paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
+        })
     } catch (error) {
         console.error('Error al listar pedidos:', error.message)
         const err = errorOracle(error)
@@ -86,7 +90,7 @@ export async function obtenerPedido(req, res) {
 }
 
 /**
- * POST /api/pedidos o POST /api/call-center/pedidos
+ * POST /api/pedidos o POST /api/call-center/pedido
  * Creación de pedido a domicilio / call center
  */
 export async function crearPedido(req, res) {
@@ -102,7 +106,8 @@ export async function crearPedido(req, res) {
             sucursalId,
             metodoPago,
             canal,
-            items
+            items,
+            medicamentos
         } = req.body
 
         const resultado = await pedidosService.crearPedido({
@@ -116,12 +121,15 @@ export async function crearPedido(req, res) {
             sucursalId,
             metodoPago,
             canal: canal || 'CALL_CENTER',
-            items,
-            usuarioId: (req.usuario || req.user)?.id
+            items: items || medicamentos,
+            usuarioId: req.usuario?.id
         })
 
         return res.status(201).json({ ok: true, ...resultado })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al crear pedido:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -129,8 +137,8 @@ export async function crearPedido(req, res) {
 }
 
 /**
- * PATCH /api/pedidos/:id/estado
- * Actualización del ciclo de vida del pedido
+ * PATCH /api/pedidos/:id o PATCH /api/pedidos/:id/estado
+ * Actualización del ciclo de vida del pedido (CONFIRMADO -> PREPARANDO -> EN_RUTA -> ENTREGADO / CANCELADO)
  */
 export async function cambiarEstadoPedido(req, res) {
     try {
@@ -139,19 +147,22 @@ export async function cambiarEstadoPedido(req, res) {
             return res.status(400).json({ ok: false, error: 'ID de pedido inválido' })
         }
 
-        const { estado } = req.body
-        if (!estado) {
+        const nuevoEstado = typeof req.body === 'string' ? req.body : req.body.estado
+        if (!nuevoEstado) {
             return res.status(400).json({ ok: false, error: 'El campo estado es requerido' })
         }
 
         const resultado = await pedidosService.actualizarEstadoPedido(
             id,
-            estado,
-            (req.usuario || req.user)?.id
+            nuevoEstado,
+            req.usuario?.id
         )
 
         return res.json({ ok: true, ...resultado })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al cambiar estado de pedido:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })

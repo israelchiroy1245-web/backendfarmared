@@ -6,7 +6,7 @@ import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
 /**
  * Consulta de inventario/lotes con detalles de medicamento y sucursal
  */
-export async function consultarInventario({ sucursalId, medicamentoId, alertaBajo, lote, q, limit, offset }) {
+export async function consultarInventario({ sucursalId, medicamentoId, alertaBajo, lote, laboratorio, q, limit, offset }) {
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -58,6 +58,11 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
         if (lote) {
             sql += ` AND UPPER(i.Lote) LIKE :lote`
             binds.lote = `%${String(lote).toUpperCase()}%`
+        }
+
+        if (laboratorio) {
+            sql += ` AND UPPER(m.Laboratorio) LIKE :laboratorio`
+            binds.laboratorio = `%${String(laboratorio).toUpperCase()}%`
         }
 
         if (alertaBajo === true || alertaBajo === 'true' || alertaBajo === '1') {
@@ -515,7 +520,10 @@ export async function ajustarStockLote(id, { cantidad, ajuste, usuarioId }) {
 
 /**
  * Eliminar lote vacío (DELETE)
- * Regla: Solo si Cantidad == 0. Si Cantidad > 0 retorna error 409
+ * Regla: Solo si Cantidad == 0 y nunca fue utilizado en ventas, compras o traslados.
+ * En farmacia, los lotes agotados se conservan con cantidad 0 para mantener la trazabilidad,
+ * permitir anulaciones de venta (F_Detalle_venta.F_Inventario_ID) y conservar el histórico FEFO.
+ * Este DELETE se reserva exclusivamente para corregir errores de captura (typo, alta duplicada).
  */
 export async function eliminarLoteVacio(id, usuarioId) {
     let conn
@@ -524,7 +532,10 @@ export async function eliminarLoteVacio(id, usuarioId) {
         await setUsuario(conn, usuarioId)
 
         const cur = await conn.execute(
-            `SELECT ID, Cantidad, Lote FROM F_Inventario WHERE ID = :id FOR UPDATE`,
+            `SELECT ID, Cantidad, Lote, F_Sucursal_ID, F_Medicamentos_ID 
+             FROM F_Inventario 
+             WHERE ID = :id 
+             FOR UPDATE`,
             { id: nbind(id) }
         )
 
@@ -535,12 +546,67 @@ export async function eliminarLoteVacio(id, usuarioId) {
             throw err
         }
 
+        // 1. Validar que no tenga existencias físicas
         if (actual.CANTIDAD > 0) {
             const err = new Error(`No se puede eliminar el lote ${actual.LOTE} porque tiene existencias (${actual.CANTIDAD} unidades). La cantidad debe ser 0.`)
             err.statusCode = 409
             throw err
         }
 
+        // 2. Validar que no existan tickets de venta apuntando a este lote (integridad referencial y anulaciones)
+        const checkVentas = await conn.execute(
+            `SELECT COUNT(*) AS CNT FROM F_Detalle_venta WHERE F_Inventario_ID = :id`,
+            { id: nbind(id) }
+        )
+        const totalVentas = checkVentas.rows?.[0]?.CNT || 0
+        if (totalVentas > 0) {
+            const err = new Error(
+                `No se puede eliminar el lote ${actual.LOTE} porque tiene ${totalVentas} venta(s) asociada(s). ` +
+                `En farmacia los lotes agotados deben permanecer en 0 para trazabilidad y posibles anulaciones.`
+            )
+            err.statusCode = 409
+            throw err
+        }
+
+        // 3. Validar que no posea movimientos transaccionales reales en Kardex (ventas, compras, transferencias)
+        const checkKardex = await conn.execute(
+            `SELECT COUNT(*) AS CNT 
+             FROM F_Movimiento_inventario 
+             WHERE F_Sucursal_ID = :suc 
+               AND F_Medicamentos_ID = :med 
+               AND Lote = :lote 
+               AND Tipo IN ('VENTA', 'COMPRA', 'TRANSFERENCIA_IN', 'TRANSFERENCIA_OUT')`,
+            {
+                suc: nbind(actual.F_SUCURSAL_ID),
+                med: nbind(actual.F_MEDICAMENTOS_ID),
+                lote: actual.LOTE
+            }
+        )
+        const totalKardex = checkKardex.rows?.[0]?.CNT || 0
+        if (totalKardex > 0) {
+            const err = new Error(
+                `No se puede eliminar el lote ${actual.LOTE} porque tiene historial comercial registrado en Kardex. ` +
+                `Solo se permite eliminar lotes erróneos sin historial transaccional.`
+            )
+            err.statusCode = 409
+            throw err
+        }
+
+        // 4. Si fue un lote creado por error (sin transacciones comerciales), limpiar movimientos de alta inicial si existiesen
+        await conn.execute(
+            `DELETE FROM F_Movimiento_inventario 
+             WHERE F_Sucursal_ID = :suc 
+               AND F_Medicamentos_ID = :med 
+               AND Lote = :lote 
+               AND Referencia = 'ALTA-INICIAL'`,
+            {
+                suc: nbind(actual.F_SUCURSAL_ID),
+                med: nbind(actual.F_MEDICAMENTOS_ID),
+                lote: actual.LOTE
+            }
+        )
+
+        // 5. Proceder al borrado físico en F_Inventario
         await conn.execute(`DELETE FROM F_Inventario WHERE ID = :id`, { id: nbind(id) })
         await conn.commit()
 
@@ -548,6 +614,11 @@ export async function eliminarLoteVacio(id, usuarioId) {
     } catch (error) {
         if (conn) {
             try { await conn.rollback() } catch (_) {}
+        }
+        if (error.message?.includes('ORA-02292')) {
+            const err = new Error(`No se puede eliminar el lote ${actual?.LOTE || id} porque tiene registros relacionados en otras tablas de la base de datos (integridad referencial).`)
+            err.statusCode = 409
+            throw err
         }
         throw error
     } finally {

@@ -5,6 +5,14 @@ import { num, nbind } from '../utils/oracle.js'
 const ESTADOS_VALIDOS = ['NUEVO', 'CONFIRMADO', 'PREPARANDO', 'EN_RUTA', 'ENTREGADO', 'CANCELADO']
 const METODOS_PAGO_VALIDOS = ['EFECTIVO', 'TARJETA', 'TRANSFERENCIA']
 
+const COORDENADAS_DEPARTAMENTO = {
+    'GUATEMALA': { latitud: 14.6349, longitud: -90.5069 },
+    'SACATEPEQUEZ': { latitud: 14.5586, longitud: -90.7295 },
+    'ANTIGUA': { latitud: 14.5586, longitud: -90.7295 },
+    'QUETZALTENANGO': { latitud: 14.8347, longitud: -91.5181 },
+    'ESCUINTLA': { latitud: 14.3009, longitud: -90.7850 }
+}
+
 /**
  * Fórmula de Haversine para cálculo de distancia en km entre dos coordenadas (en Node.js)
  */
@@ -36,19 +44,25 @@ export function estimarEtaMinutos(distanciaKm) {
 export async function consultarDisponibilidad({
     latitud,
     longitud,
-    items = []
+    departamento,
+    depto,
+    items,
+    medicamentos
 }) {
-    const latCliente = num(latitud)
-    const lonCliente = num(longitud)
+    let latCliente = num(latitud)
+    let lonCliente = num(longitud)
 
+    // Fallback de coordenadas si envían departamento
     if (latCliente === null || lonCliente === null) {
-        const err = new Error('Coordenadas válidas (latitud, longitud) del cliente son requeridas')
-        err.statusCode = 400
-        throw err
+        const depKey = String(departamento || depto || 'GUATEMALA').toUpperCase().trim()
+        const coords = COORDENADAS_DEPARTAMENTO[depKey] || COORDENADAS_DEPARTAMENTO['GUATEMALA']
+        latCliente = coords.latitud
+        lonCliente = coords.longitud
     }
 
-    if (!Array.isArray(items) || items.length === 0) {
-        const err = new Error('Se requiere al menos un medicamento en la lista de items')
+    const itemsAProcesar = items || medicamentos || []
+    if (!Array.isArray(itemsAProcesar) || itemsAProcesar.length === 0) {
+        const err = new Error('Se requiere al menos un medicamento en la lista de items o medicamentos')
         err.statusCode = 400
         throw err
     }
@@ -66,7 +80,7 @@ export async function consultarDisponibilidad({
         const sucursales = resSuc.rows || []
 
         // 2. Extraer IDs de medicamentos a consultar
-        const medIds = items.map(it => num(it.medicamentoId || it.id)).filter(Boolean)
+        const medIds = itemsAProcesar.map(it => num(it.medicamentoId || it.id)).filter(Boolean)
         if (medIds.length === 0) {
             const err = new Error('IDs de medicamentos inválidos en items')
             err.statusCode = 400
@@ -115,7 +129,7 @@ export async function consultarDisponibilidad({
             let subtotalEstimado = 0
             const detalleStock = []
 
-            for (const item of items) {
+            for (const item of itemsAProcesar) {
                 const medId = num(item.medicamentoId || item.id)
                 const cantPedida = num(item.cantidad) || 1
                 const medInfo = medsMap.get(medId)
@@ -166,8 +180,12 @@ export async function consultarDisponibilidad({
         })
 
         const mejorOpcion = opciones.length > 0 && opciones[0].tieneStockCompleto ? opciones[0] : (opciones[0] || null)
+        const mensaje = mejorOpcion
+            ? `Sucursal asignada: ${mejorOpcion.nombre} (${mejorOpcion.distanciaKm} km, ETA: ${mejorOpcion.etaMinutos} min)`
+            : 'No hay sucursales disponibles'
 
         return {
+            mensaje,
             clienteCoordenadas: { latitud: latCliente, longitud: lonCliente },
             mejorOpcion,
             opciones
@@ -179,6 +197,8 @@ export async function consultarDisponibilidad({
     }
 }
 
+import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+
 /**
  * Listado de pedidos con filtros por estado, sucursal, cliente, fechas y paginación
  */
@@ -187,8 +207,9 @@ export async function consultarPedidos({
     sucursalId,
     clienteId,
     canal,
-    limit = 50,
-    offset = 0
+    q,
+    limit,
+    offset
 }) {
     let conn
     try {
@@ -248,17 +269,25 @@ export async function consultarPedidos({
             binds.canal = String(canal).toUpperCase().trim()
         }
 
-        sql += ` ORDER BY p.Creado_en DESC, p.ID DESC`
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(c.Nombre || ' ' || NVL(c.Apellido, '')) LIKE :q
+                OR UPPER(c.NIT) LIKE :q
+                OR UPPER(p.Direccion_entrega) LIKE :q
+                OR UPPER(s.Nombre) LIKE :q
+                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
+            )`
+            binds.q = busqueda
+        }
 
-        const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
-        const safeOffset = Math.max(Number(offset) || 0, 0)
-
-        sql += ` OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`
-        binds.offset = nbind(safeOffset)
-        binds.limit = nbind(safeLimit)
-
-        const result = await conn.execute(sql, binds)
-        return result.rows || []
+        return await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY p.Creado_en DESC, p.ID DESC',
+            limit,
+            offset,
+        })
     } finally {
         if (conn) {
             try { await conn.close() } catch (_) {}

@@ -1,5 +1,6 @@
 import * as activosService from '../services/activos.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
+import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
 
 /**
  * GET /api/activos
@@ -11,10 +12,9 @@ export async function listarActivos(req, res) {
         const categoria = req.query.categoria
         const estado = req.query.estado
         const q = req.query.q
-        const limit = num(req.query.limit) || 50
-        const offset = num(req.query.offset) || 0
+        const { limit, offset } = leerPaginacion(req.query)
 
-        const activos = await activosService.consultarActivos({
+        const pagina = await activosService.consultarActivos({
             sucursalId,
             categoria,
             estado,
@@ -23,20 +23,20 @@ export async function listarActivos(req, res) {
             offset
         })
 
-        // Totales agregados útiles para el balance gerencial
-        const totalAdquisicion = activos.reduce((sum, a) => sum + (Number(a.VALOR_ADQUISICION) || 0), 0)
-        const totalDepreciacion = activos.reduce((sum, a) => sum + (Number(a.DEPRECIACION_ACUMULADA) || 0), 0)
-        const totalLibros = activos.reduce((sum, a) => sum + (Number(a.VALOR_LIBROS) || 0), 0)
+        const totalAdquisicion = Number(pagina.metrics?.TOTAL_ADQUISICION ?? 0)
+        const totalDepreciacion = Number(pagina.metrics?.TOTAL_DEPRECIACION ?? 0)
+        const totalLibros = Number(pagina.metrics?.TOTAL_LIBROS ?? 0)
 
         return res.json({
             ok: true,
-            total: activos.length,
+            datos: pagina.rows,
+            total: pagina.total,
             balance: {
                 totalAdquisicion: Math.round(totalAdquisicion * 100) / 100,
                 totalDepreciacion: Math.round(totalDepreciacion * 100) / 100,
                 totalLibros: Math.round(totalLibros * 100) / 100
             },
-            datos: activos
+            paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
         })
     } catch (error) {
         console.error('Error al listar activos:', error.message)
@@ -99,7 +99,7 @@ export async function crearActivo(req, res) {
             depreciacionAcumulada,
             estado,
             sucursalId: num(sucursalId ?? (req.usuario || req.user)?.sucursalId),
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.status(201).json({ ok: true, ...resultado })
@@ -143,7 +143,7 @@ export async function actualizarActivo(req, res) {
             depreciacionAcumulada,
             estado,
             sucursalId,
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.json({ ok: true, ...resultado })
@@ -165,7 +165,7 @@ export async function eliminarActivo(req, res) {
             return res.status(400).json({ ok: false, error: 'ID de activo inválido' })
         }
 
-        const resultado = await activosService.eliminarActivo(id, (req.usuario || req.user)?.id)
+        const resultado = await activosService.eliminarActivo(id, req.usuario?.id)
 
         return res.json({ ok: true, ...resultado })
     } catch (error) {
@@ -185,7 +185,7 @@ export async function depreciarActivos(req, res) {
 
         const resultado = await activosService.depreciarActivosLineal({
             sucursalId,
-            usuarioId: (req.usuario || req.user)?.id
+            usuarioId: req.usuario?.id
         })
 
         return res.json({ ok: true, ...resultado })

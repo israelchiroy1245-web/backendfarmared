@@ -2,6 +2,8 @@ import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 
+import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+
 const CATEGORIAS_VALIDAS = ['MOBILIARIO', 'EQUIPO', 'VEHICULO', 'INMUEBLE', 'TECNOLOGIA']
 const ESTADOS_VALIDOS = ['EN_USO', 'BAJA', 'MANTENIMIENTO']
 
@@ -13,8 +15,8 @@ export async function consultarActivos({
     categoria,
     estado,
     q,
-    limit = 50,
-    offset = 0
+    limit,
+    offset
 }) {
     let conn
     try {
@@ -58,22 +60,25 @@ export async function consultarActivos({
             binds.estado = String(estado).toUpperCase().trim()
         }
 
-        if (q) {
-            sql += ` AND (UPPER(a.Codigo) LIKE :q OR UPPER(a.Nombre) LIKE :q)`
-            binds.q = `%${String(q).toUpperCase().trim()}%`
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(a.Codigo) LIKE :q 
+                OR UPPER(a.Nombre) LIKE :q
+                OR UPPER(s.Nombre) LIKE :q
+                OR UPPER(a.Categoria) LIKE :q
+            )`
+            binds.q = busqueda
         }
 
-        sql += ` ORDER BY a.F_Sucursal_ID ASC, a.Categoria ASC, a.ID ASC`
-
-        const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
-        const safeOffset = Math.max(Number(offset) || 0, 0)
-
-        sql += ` OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`
-        binds.offset = nbind(safeOffset)
-        binds.limit = nbind(safeLimit)
-
-        const result = await conn.execute(sql, binds)
-        return result.rows || []
+        return await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY a.F_Sucursal_ID ASC, a.Categoria ASC, a.ID ASC',
+            limit,
+            offset,
+            resumenSelect: 'SUM("VALOR_ADQUISICION") AS TOTAL_ADQUISICION, SUM("DEPRECIACION_ACUMULADA") AS TOTAL_DEPRECIACION, SUM("VALOR_LIBROS") AS TOTAL_LIBROS',
+        })
     } finally {
         if (conn) {
             try { await conn.close() } catch (_) {}

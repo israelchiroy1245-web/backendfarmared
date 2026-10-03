@@ -12,6 +12,7 @@ export async function listarInventario(req, res) {
         const medicamentoId = num(req.query.medicamentoId)
         const alertaBajo = req.query.alertaBajo
         const lote = req.query.lote
+        const laboratorio = req.query.laboratorio
         const { limit, offset } = leerPaginacion(req.query)
 
         const pagina = await inventarioService.consultarInventario({
@@ -19,6 +20,7 @@ export async function listarInventario(req, res) {
             medicamentoId,
             alertaBajo,
             lote,
+            laboratorio,
             q: req.query.q,
             limit,
             offset,

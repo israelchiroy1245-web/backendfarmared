@@ -1,5 +1,6 @@
 import { oracledb } from '../config/database.js'
 import { num, nbind } from '../utils/oracle.js'
+import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
 
 /**
  * CU04: Reporte Ejecutivo del Valor Consolidado de la Red de Farmacias
@@ -144,7 +145,7 @@ export async function reporteConsolidadoRed() {
 }
 
 /**
- * Reporte de Ventas por Sucursal, Fechas y Forma de Pago
+ * Reporte de Ventas por Sucursal, Fechas y Forma de Pago (3FN)
  */
 export async function reporteVentas({ sucursalId, fechaInicio, fechaFin }) {
     let conn
@@ -156,13 +157,19 @@ export async function reporteVentas({ sucursalId, fechaInicio, fechaFin }) {
                 s.ID AS SUCURSAL_ID,
                 s.Nombre AS SUCURSAL_NOMBRE,
                 s.Tipo AS SUCURSAL_TIPO,
-                COUNT(v.ID) AS TOTAL_TRANSACCIONES,
+                COUNT(DISTINCT v.ID) AS TOTAL_TRANSACCIONES,
                 NVL(SUM(v.Total), 0) AS TOTAL_VENTAS,
-                NVL(SUM(CASE WHEN v.Metodo_pago = 'EFECTIVO' THEN v.Total ELSE 0 END), 0) AS VENTAS_EFECTIVO,
-                NVL(SUM(CASE WHEN v.Metodo_pago = 'TARJETA' THEN v.Total ELSE 0 END), 0) AS VENTAS_TARJETA,
-                NVL(SUM(CASE WHEN v.Metodo_pago = 'TRANSFERENCIA' THEN v.Total ELSE 0 END), 0) AS VENTAS_TRANSFERENCIA
+                NVL(SUM(
+                    (SELECT SUM(p.Monto) FROM F_Venta_pago p WHERE p.F_Ventas_ID = v.ID AND p.Metodo_pago = 'EFECTIVO')
+                ), 0) AS VENTAS_EFECTIVO,
+                NVL(SUM(
+                    (SELECT SUM(p.Monto) FROM F_Venta_pago p WHERE p.F_Ventas_ID = v.ID AND p.Metodo_pago = 'TARJETA')
+                ), 0) AS VENTAS_TARJETA,
+                NVL(SUM(
+                    (SELECT SUM(p.Monto) FROM F_Venta_pago p WHERE p.F_Ventas_ID = v.ID AND p.Metodo_pago = 'TRANSFERENCIA')
+                ), 0) AS VENTAS_TRANSFERENCIA
             FROM F_Sucursal s
-            LEFT JOIN F_Ventas v ON v.F_Sucursal_ID = s.ID AND v.Estado = 'COMPLETADA'
+            LEFT JOIN F_Ventas v ON v.F_Sucursal_ID = s.ID AND v.Estado = 'EMITIDA'
         `
         const binds = {}
 
@@ -246,10 +253,13 @@ export async function reporteInventarioFefo({ sucursalId, diasVencimiento = 90 }
 /**
  * Reporte de Auditoría de Cajas y Arqueos (Faltantes y Sobrantes)
  */
-export async function reporteArqueoCajas({ sucursalId }) {
+export async function reporteArqueoCajas({ sucursalId, desde, hasta, fechaDesde, fechaHasta }) {
     let conn
     try {
         conn = await oracledb.getConnection()
+
+        const fDesde = desde || fechaDesde
+        const fHasta = hasta || fechaHasta
 
         let sql = `
             SELECT 
@@ -279,6 +289,16 @@ export async function reporteArqueoCajas({ sucursalId }) {
             binds.sucId = nbind(sucursalId)
         }
 
+        if (fDesde) {
+            sql += ` AND t.Fecha_apertura >= TO_DATE(:fDesde, 'YYYY-MM-DD')`
+            binds.fDesde = String(fDesde).substring(0, 10)
+        }
+
+        if (fHasta) {
+            sql += ` AND t.Fecha_apertura < TO_DATE(:fHasta, 'YYYY-MM-DD') + 1`
+            binds.fHasta = String(fHasta).substring(0, 10)
+        }
+
         sql += ` ORDER BY t.Fecha_apertura DESC`
 
         const res = await conn.execute(sql, binds)
@@ -304,6 +324,266 @@ export async function reporteArqueoCajas({ sucursalId }) {
             },
             turnos
         }
+    } finally {
+        if (conn) {
+            try { await conn.close() } catch (_) {}
+        }
+    }
+}
+
+/**
+ * Reporte de Planilla por Período
+ */
+export async function reportePlanilla({ periodo, sucursalId }) {
+    let conn
+    try {
+        conn = await oracledb.getConnection()
+
+        let sql = `
+            SELECT 
+                p.Periodo AS PERIODO,
+                s.ID AS SUCURSAL_ID,
+                s.Nombre AS SUCURSAL_NOMBRE,
+                COUNT(p.ID) AS TOTAL_EMPLEADOS,
+                NVL(SUM(p.Salario_base), 0) AS TOTAL_SALARIOS,
+                NVL(SUM(p.Bonificaciones), 0) AS TOTAL_BONIFICACIONES,
+                NVL(SUM(p.Descuentos), 0) AS TOTAL_DESCUENTOS,
+                NVL(SUM(p.Igss), 0) AS TOTAL_IGSS,
+                NVL(SUM(p.Total), 0) AS TOTAL_A_PAGAR,
+                SUM(CASE WHEN p.Estado = 'PAGADA' THEN 1 ELSE 0 END) AS EMPLEADOS_PAGADOS,
+                SUM(CASE WHEN p.Estado = 'PENDIENTE' THEN 1 ELSE 0 END) AS EMPLEADOS_PENDIENTES
+            FROM F_Planilla p
+            JOIN F_Empleados e ON e.ID = p.F_Empleados_ID
+            JOIN F_Sucursal s ON s.ID = e.Sucursal_ID
+            WHERE 1 = 1
+        `
+        const binds = {}
+
+        if (periodo) {
+            sql += ` AND p.Periodo = :periodo`
+            binds.periodo = String(periodo).trim()
+        }
+
+        if (sucursalId) {
+            sql += ` AND s.ID = :sucId`
+            binds.sucId = nbind(sucursalId)
+        }
+
+        sql += ` GROUP BY p.Periodo, s.ID, s.Nombre ORDER BY p.Periodo DESC, s.Nombre ASC`
+
+        const res = await conn.execute(sql, binds)
+        const filas = res.rows || []
+
+        const totalNomina = filas.reduce((sum, r) => sum + (Number(r.TOTAL_A_PAGAR) || 0), 0)
+
+        return {
+            periodo: periodo || 'TODOS',
+            totalNominaRed: Math.round(totalNomina * 100) / 100,
+            desglose: filas
+        }
+    } finally {
+        if (conn) {
+            try { await conn.close() } catch (_) {}
+        }
+    }
+}
+
+/**
+ * Reporte de Activos Fijos y Depreciación
+ */
+export async function reporteActivos({ sucursalId, categoria }) {
+    let conn
+    try {
+        conn = await oracledb.getConnection()
+
+        let sql = `
+            SELECT 
+                s.ID AS SUCURSAL_ID,
+                s.Nombre AS SUCURSAL_NOMBRE,
+                a.Categoria AS CATEGORIA,
+                COUNT(a.ID) AS TOTAL_ACTIVOS,
+                NVL(SUM(a.Valor_adquisicion), 0) AS TOTAL_ADQUISICION,
+                NVL(SUM(a.Depreciacion_acumulada), 0) AS TOTAL_DEPRECIACION,
+                NVL(SUM(a.Valor_adquisicion - a.Depreciacion_acumulada), 0) AS VALOR_LIBROS
+            FROM F_Activo_fijo a
+            JOIN F_Sucursal s ON s.ID = a.F_Sucursal_ID
+            WHERE a.Estado <> 'BAJA'
+        `
+        const binds = {}
+
+        if (sucursalId) {
+            sql += ` AND s.ID = :sucId`
+            binds.sucId = nbind(sucursalId)
+        }
+
+        if (categoria) {
+            sql += ` AND a.Categoria = :cat`
+            binds.cat = String(categoria).toUpperCase().trim()
+        }
+
+        sql += ` GROUP BY s.ID, s.Nombre, a.Categoria ORDER BY s.Nombre ASC, a.Categoria ASC`
+
+        const res = await conn.execute(sql, binds)
+        const filas = res.rows || []
+
+        const totalLibros = filas.reduce((sum, r) => sum + (Number(r.VALOR_LIBROS) || 0), 0)
+        const totalAdquisicion = filas.reduce((sum, r) => sum + (Number(r.TOTAL_ADQUISICION) || 0), 0)
+
+        return {
+            totalActivos: filas.reduce((sum, r) => sum + (Number(r.TOTAL_ACTIVOS) || 0), 0),
+            totalAdquisicion: Math.round(totalAdquisicion * 100) / 100,
+            totalValorLibros: Math.round(totalLibros * 100) / 100,
+            desglose: filas
+        }
+    } finally {
+        if (conn) {
+            try { await conn.close() } catch (_) {}
+        }
+    }
+}
+
+/**
+ * Reporte de Kardex de Inventario (F_Movimiento_inventario)
+ */
+export async function reporteKardex({ sucursalId, medicamentoId, tipo, desde, hasta, q, limit, offset }) {
+    let conn
+    try {
+        conn = await oracledb.getConnection()
+
+        let sql = `
+            SELECT 
+                m.ID AS "ID",
+                m.Tipo AS "TIPO",
+                m.Cantidad AS "CANTIDAD",
+                m.Lote AS "LOTE",
+                m.Referencia AS "REFERENCIA",
+                TO_CHAR(m.Fecha, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA",
+                s.ID AS "SUCURSAL_ID",
+                s.Nombre AS "SUCURSAL_NOMBRE",
+                med.ID AS "MEDICAMENTO_ID",
+                med.Nombre_medic AS "MEDICAMENTO_NOMBRE",
+                u.Nombre || ' ' || u.Apellido AS "USUARIO_NOMBRE"
+            FROM F_Movimiento_inventario m
+            JOIN F_Sucursal s ON s.ID = m.F_Sucursal_ID
+            JOIN F_Medicamentos med ON med.ID = m.F_Medicamentos_ID
+            LEFT JOIN F_Usuarios u ON u.ID = m.F_Usuarios_ID
+            WHERE 1 = 1
+        `
+        const binds = {}
+
+        if (sucursalId) {
+            sql += ` AND m.F_Sucursal_ID = :sucId`
+            binds.sucId = nbind(sucursalId)
+        }
+
+        if (medicamentoId) {
+            sql += ` AND m.F_Medicamentos_ID = :medId`
+            binds.medId = nbind(medicamentoId)
+        }
+
+        if (tipo) {
+            sql += ` AND m.Tipo = :tipo`
+            binds.tipo = String(tipo).toUpperCase().trim()
+        }
+
+        if (desde) {
+            sql += ` AND m.Fecha >= TO_DATE(:desde, 'YYYY-MM-DD')`
+            binds.desde = String(desde).substring(0, 10)
+        }
+
+        if (hasta) {
+            sql += ` AND m.Fecha < TO_DATE(:hasta, 'YYYY-MM-DD') + 1`
+            binds.hasta = String(hasta).substring(0, 10)
+        }
+
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(med.Nombre_medic) LIKE :q
+                OR UPPER(m.Lote) LIKE :q
+                OR UPPER(NVL(m.Referencia, '')) LIKE :q
+                OR UPPER(s.Nombre) LIKE :q
+            )`
+            binds.q = busqueda
+        }
+
+        return await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY m.Fecha DESC, m.ID DESC',
+            limit,
+            offset,
+        })
+    } finally {
+        if (conn) {
+            try { await conn.close() } catch (_) {}
+        }
+    }
+}
+
+/**
+ * Reporte de Bitácora de Auditoría del Sistema (F_Auditoria)
+ */
+export async function reporteAuditoria({ tabla, accion, desde, hasta, q, limit, offset }) {
+    let conn
+    try {
+        conn = await oracledb.getConnection()
+
+        let sql = `
+            SELECT 
+                a.ID AS "ID",
+                a.Tabla_afectada AS "TABLA",
+                a.Accion AS "ACCION",
+                a.Id_registro AS "ID_REGISTRO",
+                a.Datos_anteriores AS "DATOS_ANTERIORES",
+                a.Datos_nuevos AS "DATOS_NUEVOS",
+                TO_CHAR(a.Fecha, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA",
+                a.Usuario_oracle AS "USUARIO_ORACLE",
+                a.Ip AS "IP",
+                u.Nombre || ' ' || u.Apellido AS "USUARIO_NOMBRE",
+                u.Email AS "USUARIO_EMAIL"
+            FROM F_Auditoria a
+            LEFT JOIN F_Usuarios u ON u.ID = a.F_Usuarios_ID
+            WHERE 1 = 1
+        `
+        const binds = {}
+
+        if (tabla) {
+            sql += ` AND UPPER(a.Tabla_afectada) = :tabla`
+            binds.tabla = String(tabla).toUpperCase().trim()
+        }
+
+        if (accion) {
+            sql += ` AND a.Accion = :accion`
+            binds.accion = String(accion).toUpperCase().trim()
+        }
+
+        if (desde) {
+            sql += ` AND a.Fecha >= TO_DATE(:desde, 'YYYY-MM-DD')`
+            binds.desde = String(desde).substring(0, 10)
+        }
+
+        if (hasta) {
+            sql += ` AND a.Fecha < TO_DATE(:hasta, 'YYYY-MM-DD') + 1`
+            binds.hasta = String(hasta).substring(0, 10)
+        }
+
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(a.Tabla_afectada) LIKE :q
+                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q
+            )`
+            binds.q = busqueda
+        }
+
+        return await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY a.Fecha DESC, a.ID DESC',
+            limit,
+            offset,
+        })
     } finally {
         if (conn) {
             try { await conn.close() } catch (_) {}

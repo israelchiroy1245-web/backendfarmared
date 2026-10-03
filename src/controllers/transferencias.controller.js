@@ -1,25 +1,39 @@
 import * as transferenciasService from '../services/transferencias.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
+import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
 
 /**
  * GET /api/transferencias
- * Listado de transferencias con filtros por sucursal y estado
+ * Listado de transferencias con filtros y paginación
  */
 export async function listarTransferencias(req, res) {
     try {
         const sucursalId = num(req.query.sucursalId)
+        const origenId = num(req.query.origenId)
+        const destinoId = num(req.query.destinoId)
         const estado = req.query.estado
-        const limit = num(req.query.limit) || 50
-        const offset = num(req.query.offset) || 0
+        const fechaDesde = req.query.fechaDesde
+        const fechaHasta = req.query.fechaHasta
+        const { limit, offset } = leerPaginacion(req.query)
 
-        const transferencias = await transferenciasService.consultarTransferencias({
+        const pagina = await transferenciasService.consultarTransferencias({
             sucursalId,
+            origenId,
+            destinoId,
             estado,
+            fechaDesde,
+            fechaHasta,
+            q: req.query.q,
             limit,
             offset
         })
 
-        return res.json({ ok: true, total: transferencias.length, datos: transferencias })
+        return res.json({
+            ok: true,
+            datos: pagina.rows,
+            total: pagina.total,
+            paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
+        })
     } catch (error) {
         console.error('Error al listar transferencias:', error.message)
         const err = errorOracle(error)

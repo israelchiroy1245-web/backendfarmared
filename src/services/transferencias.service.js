@@ -1,15 +1,21 @@
 import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
+import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
 
 /**
- * Consulta de transferencias con filtros y paginación
+ * Consulta de transferencias con filtros y paginación estándar
  */
 export async function consultarTransferencias({
     sucursalId,
+    origenId,
+    destinoId,
     estado,
-    limit = 50,
-    offset = 0
+    fechaDesde,
+    fechaHasta,
+    q,
+    limit,
+    offset
 }) {
     let conn
     try {
@@ -31,7 +37,8 @@ export async function consultarTransferencias({
                 TO_CHAR(t.Fecha_solicitud, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA_SOLICITUD",
                 TO_CHAR(t.Fecha_envio, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA_ENVIO",
                 TO_CHAR(t.Fecha_recepcion, 'YYYY-MM-DD HH24:MI:SS') AS "FECHA_RECEPCION",
-                (SELECT COUNT(*) FROM F_Transferencia_detalle d WHERE d.F_Transferencia_ID = t.ID) AS "TOTAL_LINEAS"
+                (SELECT COUNT(*) FROM F_Transferencia_detalle d WHERE d.F_Transferencia_ID = t.ID) AS "TOTAL_LINEAS",
+                (SELECT NVL(SUM(d.Cantidad), 0) FROM F_Transferencia_detalle d WHERE d.F_Transferencia_ID = t.ID) AS "TOTAL_UNIDADES"
             FROM F_Transferencia t
             JOIN F_Sucursal so ON so.ID = t.Sucursal_origen_ID
             JOIN F_Sucursal sd ON sd.ID = t.Sucursal_destino_ID
@@ -46,22 +53,51 @@ export async function consultarTransferencias({
             binds.sucursalId = nbind(sucursalId)
         }
 
+        if (origenId) {
+            sql += ` AND t.Sucursal_origen_ID = :origenId`
+            binds.origenId = nbind(origenId)
+        }
+
+        if (destinoId) {
+            sql += ` AND t.Sucursal_destino_ID = :destinoId`
+            binds.destinoId = nbind(destinoId)
+        }
+
         if (estado) {
             sql += ` AND t.Estado = :estado`
             binds.estado = String(estado).toUpperCase()
         }
 
-        sql += ` ORDER BY t.Fecha_solicitud DESC, t.ID DESC`
+        if (fechaDesde) {
+            sql += ` AND t.Fecha_solicitud >= TO_DATE(:fechaDesde, 'YYYY-MM-DD')`
+            binds.fechaDesde = String(fechaDesde).substring(0, 10)
+        }
 
-        const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
-        const safeOffset = Math.max(Number(offset) || 0, 0)
+        if (fechaHasta) {
+            sql += ` AND t.Fecha_solicitud < TO_DATE(:fechaHasta, 'YYYY-MM-DD') + 1`
+            binds.fechaHasta = String(fechaHasta).substring(0, 10)
+        }
 
-        sql += ` OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`
-        binds.offset = nbind(safeOffset)
-        binds.limit = nbind(safeLimit)
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(so.Nombre) LIKE :q
+                OR UPPER(sd.Nombre) LIKE :q
+                OR UPPER(so.Codigo) LIKE :q
+                OR UPPER(sd.Codigo) LIKE :q
+                OR UPPER(NVL(t.Observacion, '')) LIKE :q
+                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q
+            )`
+            binds.q = busqueda
+        }
 
-        const result = await conn.execute(sql, binds)
-        return result.rows || []
+        return await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY t.Fecha_solicitud DESC, t.ID DESC',
+            limit,
+            offset,
+        })
     } finally {
         if (conn) {
             try { await conn.close() } catch (_) {}
@@ -146,7 +182,7 @@ export async function crearTransferencia({
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
 
-        if (origenId === destinoId) {
+        if (Number(origenId) === Number(destinoId)) {
             const err = new Error('La sucursal de origen debe ser diferente a la sucursal de destino')
             err.statusCode = 400
             throw err
@@ -161,7 +197,7 @@ export async function crearTransferencia({
         }
 
         for (const item of items) {
-            const medId = num(item.medicamentoId)
+            const medId = num(item.medicamentoId || item.id)
             const cant = num(item.cantidad)
             if (!medId || !cant || cant <= 0) {
                 const err = new Error('Cada línea debe tener medicamentoId y cantidad (> 0) válidos')
@@ -215,7 +251,7 @@ export async function crearTransferencia({
                 {
                     cant: nbind(num(item.cantidad)),
                     transfId: nbind(transferenciaId),
-                    medId: nbind(num(item.medicamentoId))
+                    medId: nbind(num(item.medicamentoId || item.id))
                 }
             )
         }
@@ -225,8 +261,8 @@ export async function crearTransferencia({
         return {
             transferenciaId,
             estado: 'SOLICITADA',
-            origenId,
-            destinoId,
+            origenId: num(origenId),
+            destinoId: num(destinoId),
             lineas: items.length,
             mensaje: 'Transferencia creada en estado SOLICITADA (stock aún no descontado)'
         }
@@ -243,7 +279,7 @@ export async function crearTransferencia({
 }
 
 /**
- * Enviar transferencia (Estado EN_TRANSITO): Descuenta de origen vía FEFO
+ * Enviar transferencia (Estado EN_TRANSITO): Descuenta de origen vía FEFO mediante procesar_transferencia_envio
  */
 export async function enviarTransferencia(id, usuarioId) {
     let conn
@@ -262,7 +298,7 @@ export async function enviarTransferencia(id, usuarioId) {
         await conn.commit()
 
         return {
-            id,
+            id: num(id),
             estado: 'EN_TRANSITO',
             mensaje: 'Transferencia despachada con éxito: stock descontado de origen por FEFO y pasada a EN_TRANSITO'
         }
@@ -279,7 +315,7 @@ export async function enviarTransferencia(id, usuarioId) {
 }
 
 /**
- * Recibir transferencia (Estado RECIBIDA): Suma stock en destino
+ * Recibir transferencia (Estado RECIBIDA): Suma stock en destino mediante procesar_transferencia_recepcion
  */
 export async function recibirTransferencia(id, usuarioId) {
     let conn
@@ -298,7 +334,7 @@ export async function recibirTransferencia(id, usuarioId) {
         await conn.commit()
 
         return {
-            id,
+            id: num(id),
             estado: 'RECIBIDA',
             mensaje: 'Transferencia recibida con éxito: stock ingresado en sucursal destino y pasada a RECIBIDA'
         }
@@ -348,7 +384,7 @@ export async function cancelarTransferencia(id, usuarioId) {
         await conn.commit()
 
         return {
-            id,
+            id: num(id),
             estado: 'CANCELADA',
             mensaje: 'Transferencia cancelada exitosamente'
         }

@@ -2,6 +2,8 @@ import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 
+import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+
 const TASA_IGSS = 0.0483 // 4.83% IGSS laboral en Guatemala
 
 /**
@@ -12,8 +14,9 @@ export async function consultarPlanillas({
     sucursalId,
     estado,
     empleadoId,
-    limit = 50,
-    offset = 0
+    q,
+    limit,
+    offset
 }) {
     let conn
     try {
@@ -65,17 +68,26 @@ export async function consultarPlanillas({
             binds.empleadoId = nbind(empleadoId)
         }
 
-        sql += ` ORDER BY p.Periodo DESC, s.Nombre ASC, u.Nombre ASC`
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
+                OR UPPER(u.Email) LIKE :q
+                OR UPPER(e.Cargo) LIKE :q
+                OR UPPER(s.Nombre) LIKE :q
+                OR UPPER(p.Periodo) LIKE :q
+            )`
+            binds.q = busqueda
+        }
 
-        const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
-        const safeOffset = Math.max(Number(offset) || 0, 0)
-
-        sql += ` OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`
-        binds.offset = nbind(safeOffset)
-        binds.limit = nbind(safeLimit)
-
-        const result = await conn.execute(sql, binds)
-        return result.rows || []
+        return await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY p.Periodo DESC, s.Nombre ASC, u.Nombre ASC',
+            limit,
+            offset,
+            resumenSelect: 'SUM("TOTAL") AS MONTO',
+        })
     } finally {
         if (conn) {
             try { await conn.close() } catch (_) {}

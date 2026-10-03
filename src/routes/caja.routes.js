@@ -3,6 +3,7 @@ import {
     listarTurnos,
     obtenerTurno,
     obtenerTurnoActivo,
+    obtenerTurnoAbierto,
     abrirTurno,
     registrarMovimiento,
     cerrarTurno,
@@ -17,6 +18,7 @@ router.use(requireAuth)
 
 // Consulta de turnos
 router.get('/', listarTurnos)
+router.get('/abierta', obtenerTurnoAbierto) // Declarar antes de /:id
 router.get('/activo', obtenerTurnoActivo)
 router.get('/:id', obtenerTurno)
 
