@@ -298,6 +298,30 @@ export async function emitirVenta({
             throw err
         }
 
+        const resTurnoLock = await conn.execute(
+            `SELECT ID, Estado, F_Sucursal_ID
+               FROM F_Turno_caja
+              WHERE ID = :turnoCajaId
+                FOR UPDATE`,
+            { turnoCajaId: nbind(turnoCajaId) }
+        )
+        const turnoRow = resTurnoLock.rows?.[0]
+        if (!turnoRow) {
+            const err = new Error('No se encontró el turno de caja')
+            err.statusCode = 404
+            throw err
+        }
+        if (String(turnoRow.ESTADO || '').toUpperCase() !== 'ABIERTA') {
+            const err = new Error('La venta POS requiere un turno de caja abierto')
+            err.statusCode = 409
+            throw err
+        }
+        if (num(turnoRow.F_SUCURSAL_ID) !== num(sucursalId)) {
+            const err = new Error('El turno no pertenece a la sucursal de la venta')
+            err.statusCode = 409
+            throw err
+        }
+
         // 4. Normalizar líneas/items a vender
         const itemsAProcesar = []
         if (medicamentoId && cantidad) {
