@@ -1,6 +1,12 @@
 import jwt from 'jsonwebtoken'
 
-const secreto = () => process.env.JWT_SECRET || 'farmared-dev'
+function secreto() {
+    const valor = process.env.JWT_SECRET
+    if (!valor) {
+        throw new Error('JWT_SECRET no está definido')
+    }
+    return valor
+}
 
 export function requireAuth(req, res, next) {
     const header = req.headers.authorization || ''
@@ -11,7 +17,10 @@ export function requireAuth(req, res, next) {
     try {
         req.usuario = jwt.verify(token, secreto())
         next()
-    } catch {
+    } catch (error) {
+        if (String(error.message || '').includes('JWT_SECRET')) {
+            return res.status(500).json({ ok: false, error: 'JWT_SECRET no está definido' })
+        }
         return res.status(401).json({ ok: false, error: 'Token inválido o vencido' })
     }
 }

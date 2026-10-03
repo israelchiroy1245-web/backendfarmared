@@ -5,15 +5,11 @@ import { initializePool, closePool } from './src/config/database.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 import authRoutes from './src/routes/auth.routes.js'
 app.use('/api/auth', authRoutes)
-
-//Rutas de Ventas
-import ventasRoutes from './src/routes/ventas.routes.js'
-app.use('/api/ventas', ventasRoutes)
 
 //Rutas de Dashboard
 import dashboardRoutes from './src/routes/dashboard.routes.js'
@@ -51,17 +47,21 @@ app.use('/api/compras', comprasRoutes)
 import proveedoresRoutes from './src/routes/proveedores.routes.js'
 app.use('/api/proveedores', proveedoresRoutes)
 
-//Rutas de Transferencias (Módulo 5)
+//Rutas de Caja & Turnos (Módulo 4) — antes que el POS
+import cajaRoutes from './src/routes/caja.routes.js'
+app.use('/api/caja', cajaRoutes)
+
+//Rutas de Ventas POS (Módulo 5)
+import ventasRoutes from './src/routes/ventas.routes.js'
+app.use('/api/ventas', ventasRoutes)
+
+//Rutas de Transferencias
 import transferenciasRoutes from './src/routes/transferencias.routes.js'
 app.use('/api/transferencias', transferenciasRoutes)
 
 //Rutas de Catálogos de Apoyo
 import catalogosRoutes from './src/routes/catalogos.routes.js'
 app.use('/api/catalogos', catalogosRoutes)
-
-//Rutas de Caja & Turnos (Módulo 6)
-import cajaRoutes from './src/routes/caja.routes.js'
-app.use('/api/caja', cajaRoutes)
 
 //Rutas de Planilla (Módulo 7)
 import planillaRoutes from './src/routes/planilla.routes.js'
