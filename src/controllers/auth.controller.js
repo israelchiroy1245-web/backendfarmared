@@ -112,17 +112,17 @@ export const registrarEmpleado = async (req, res) => {
 
         const altaE = await conn.execute(
             `INSERT INTO F_Empleados (Cargo, Salario, Estado, Usuarios_ID, Sucursal_ID)
-       VALUES (:cargo, :salario, 'ACTIVO', :uid, :suc)
-       RETURNING ID INTO :id`,
+       VALUES (:cargo, :salario, 'ACTIVO', :usuarioId, :sucursalId)
+       RETURNING ID INTO :empleadoId`,
             {
                 cargo,
                 salario: { val: salario, type: oracledb.NUMBER },
-                uid: { val: usuarioId, type: oracledb.NUMBER },
-                suc: { val: sucursalId, type: oracledb.NUMBER },
-                id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+                usuarioId: { val: usuarioId, type: oracledb.NUMBER },
+                sucursalId: { val: sucursalId, type: oracledb.NUMBER },
+                empleadoId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
             },
         )
-        const empleadoId = Array.isArray(altaE.outBinds.id) ? altaE.outBinds.id[0] : altaE.outBinds.id
+        const empleadoId = Array.isArray(altaE.outBinds.empleadoId) ? altaE.outBinds.empleadoId[0] : altaE.outBinds.empleadoId
 
         await conn.commit()
         return res.status(201).json({

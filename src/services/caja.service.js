@@ -190,8 +190,9 @@ export async function consultarTurnoActivo(usuarioId) {
     let conn
     try {
         conn = await oracledb.getConnection()
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) return null
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) return null
+        const empleadoId = empleado.id
 
         const res = await conn.execute(
             `SELECT ID FROM F_Turno_caja WHERE F_Empleados_ID = :emp AND Estado = 'ABIERTA'`,
@@ -214,7 +215,8 @@ export async function consultarTurnoActivo(usuarioId) {
 export async function abrirTurno({
     sucursalId,
     montoInicial,
-    usuarioId
+    usuarioId,
+    rol
 }) {
     let conn
     try {
@@ -222,9 +224,17 @@ export async function abrirTurno({
         await setUsuario(conn, usuarioId)
 
         // Validar empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
+            err.statusCode = 403
+            throw err
+        }
+        const empleadoId = empleado.id
+
+        if (String(rol || '').toUpperCase() === 'CAJERO'
+            && num(empleado.sucursalId) !== num(sucursalId)) {
+            const err = new Error('El cajero solo puede abrir caja en su sucursal asignada')
             err.statusCode = 403
             throw err
         }
@@ -484,7 +494,8 @@ export async function cerrarTurno(turnoId, {
         const gsts = Number(turno.GASTOS) || 0
 
         // Obtener ID del empleado que está cerrando
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        const empleadoId = empleado?.id
 
         // Fórmula rectora de arqueo:
         // esperadoEnCaja = inicial + ventas_efectivo - gastos

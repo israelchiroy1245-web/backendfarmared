@@ -1,6 +1,7 @@
 import * as cajaService from '../services/caja.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal, rolDe } from '../utils/sucursalSesion.js'
 
 function fallo(res, error, contexto) {
     console.error(contexto, error.message)
@@ -17,7 +18,7 @@ function fallo(res, error, contexto) {
  */
 export async function listarTurnos(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const estado = req.query.estado
         const cajeroId = num(req.query.cajeroId)
         const { limit, offset } = leerPaginacion(req.query)
@@ -49,7 +50,7 @@ export async function listarTurnos(req, res) {
  */
 export async function obtenerTurnoAbierto(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId ?? (req.usuario || req.user)?.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         if (!sucursalId) {
             return res.status(400).json({ ok: false, error: 'sucursalId es requerido' })
         }
@@ -107,7 +108,7 @@ export async function obtenerTurno(req, res) {
  */
 export async function abrirTurno(req, res) {
     try {
-        const sucursalId = num(req.body.sucursalId ?? req.body.sucursal_id ?? (req.usuario || req.user)?.sucursalId)
+        const sucursalId = resolverSucursal(req, req.body.sucursalId ?? req.body.sucursal_id)
         const montoInicial = num(req.body.montoInicial ?? req.body.monto_inicial)
 
         if (!sucursalId) {
@@ -120,7 +121,8 @@ export async function abrirTurno(req, res) {
         const resultado = await cajaService.abrirTurno({
             sucursalId,
             montoInicial,
-            usuarioId: (req.usuario || req.user).id
+            usuarioId: (req.usuario || req.user).id,
+            rol: rolDe(req),
         })
 
         return res.status(201).json({ ok: true, ...resultado })

@@ -164,12 +164,13 @@ export async function registrarCompra({
         await setUsuario(conn, usuarioId)
 
         // 2. Validar que el usuario tenga empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
             err.statusCode = 403
             throw err
         }
+        const empleadoId = empleado.id
 
         // 3. Validar existencia del proveedor y sucursal
         const provCheck = await conn.execute(

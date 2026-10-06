@@ -176,19 +176,19 @@ export const crearUsuario = async (req, res) => {
         if (cargo && salario != null && sucursalId != null) {
             const resultEmpleado = await conn.execute(
                 `INSERT INTO F_Empleados (Cargo, Salario, Estado, Usuarios_ID, Sucursal_ID)
-                 VALUES (:cargo, :salario, 'ACTIVO', :uid, :suc)
-                 RETURNING ID INTO :id`,
+                 VALUES (:cargo, :salario, 'ACTIVO', :usuarioId, :sucursalId)
+                 RETURNING ID INTO :empleadoId`,
                 {
                     cargo,
                     salario: { val: salario, type: oracledb.NUMBER },
-                    uid: { val: idUsuarioCreado, type: oracledb.NUMBER },
-                    suc: { val: sucursalId, type: oracledb.NUMBER },
-                    id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+                    usuarioId: { val: idUsuarioCreado, type: oracledb.NUMBER },
+                    sucursalId: { val: sucursalId, type: oracledb.NUMBER },
+                    empleadoId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
                 }
             )
-            empleadoId = Array.isArray(resultEmpleado.outBinds.id)
-                ? resultEmpleado.outBinds.id[0]
-                : resultEmpleado.outBinds.id
+            empleadoId = Array.isArray(resultEmpleado.outBinds.empleadoId)
+                ? resultEmpleado.outBinds.empleadoId[0]
+                : resultEmpleado.outBinds.empleadoId
         }
 
         await conn.commit()
@@ -317,13 +317,13 @@ export const actualizarUsuario = async (req, res) => {
         } else if (cargo && salario != null && sucursalId != null) {
             await conn.execute(
                 `INSERT INTO F_Empleados (Cargo, Salario, Estado, Usuarios_ID, Sucursal_ID)
-                 VALUES (:cargo, :salario, :estado, :uid, :suc)`,
+                 VALUES (:cargo, :salario, :estadoEmp, :usuarioId, :sucursalId)`,
                 {
                     cargo,
                     salario: { val: salario, type: oracledb.NUMBER },
-                    estado: estado ?? 'ACTIVO',
-                    uid: { val: id, type: oracledb.NUMBER },
-                    suc: { val: sucursalId, type: oracledb.NUMBER }
+                    estadoEmp: estado ?? 'ACTIVO',
+                    usuarioId: { val: id, type: oracledb.NUMBER },
+                    sucursalId: { val: sucursalId, type: oracledb.NUMBER }
                 }
             )
         }

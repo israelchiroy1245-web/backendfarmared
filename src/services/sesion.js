@@ -8,8 +8,11 @@ export async function setUsuario(conn, usuarioId) {
 
 export async function empleadoActivoDeUsuario(conn, usuarioId) {
     const emp = await conn.execute(
-        `SELECT ID FROM F_Empleados WHERE Usuarios_ID = :u AND Estado = 'ACTIVO' AND ROWNUM = 1`,
+        `SELECT ID, Sucursal_ID FROM F_Empleados
+          WHERE Usuarios_ID = :u AND Estado = 'ACTIVO' AND ROWNUM = 1`,
         { u: { val: usuarioId, type: oracledb.NUMBER } },
     )
-    return emp.rows?.[0]?.ID ?? null
+    const row = emp.rows?.[0]
+    if (!row) return null
+    return { id: row.ID, sucursalId: row.SUCURSAL_ID }
 }

@@ -1,6 +1,7 @@
 import * as ventasService from '../services/ventas.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal, rolDe } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/ventas
@@ -8,7 +9,7 @@ import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
  */
 export async function listarVentas(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const empleadoId = num(req.query.empleadoId)
         const clienteId = num(req.query.clienteId)
         const metodoPago = req.query.metodoPago
@@ -44,6 +45,9 @@ export async function listarVentas(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar ventas:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -85,7 +89,7 @@ export async function obtenerVenta(req, res) {
  */
 export async function registrarVenta(req, res) {
     try {
-        const sucursalId = num(req.body.sucursalId)
+        const sucursalId = resolverSucursal(req, req.body.sucursalId)
         const turnoId = num(req.body.turnoId)
         const serie = req.body.serie || 'A'
         const tipoDoc = req.body.tipoDoc || 'TICKET'
@@ -141,7 +145,8 @@ export async function registrarVenta(req, res) {
             pagos,
             metodoPago,
             montoRecibido,
-            usuarioId
+            usuarioId,
+            rol: rolDe(req),
         })
 
         return res.status(201).json({

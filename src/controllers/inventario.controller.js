@@ -1,6 +1,7 @@
 import * as inventarioService from '../services/inventario.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/inventario
@@ -8,7 +9,7 @@ import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
  */
 export async function listarInventario(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const medicamentoId = num(req.query.medicamentoId)
         const alertaBajo = req.query.alertaBajo
         const lote = req.query.lote
@@ -37,6 +38,9 @@ export async function listarInventario(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar inventario:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -49,7 +53,7 @@ export async function listarInventario(req, res) {
  */
 export async function listarKardex(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const medicamentoId = num(req.query.medicamentoId)
         const tipo = req.query.tipo
         const { limit, offset } = leerPaginacion(req.query)
@@ -70,6 +74,9 @@ export async function listarKardex(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al consultar kardex:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })

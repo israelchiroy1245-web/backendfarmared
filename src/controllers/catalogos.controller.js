@@ -1,19 +1,28 @@
 import { oracledb } from '../config/database.js'
-import { errorOracle } from '../utils/oracle.js'
+import { errorOracle, nbind } from '../utils/oracle.js'
+import { rolDe, sucursalDelToken } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/catalogos/sucursales
  * Lista simplificada de sucursales activas para combos y selectores
  */
-export async function catalogoSucursales(_req, res) {
+export async function catalogoSucursales(req, res) {
     let conn
     try {
         conn = await oracledb.getConnection()
+        const propia = sucursalDelToken(req)
+        const soloCajero = rolDe(req) === 'CAJERO' && propia
         const result = await conn.execute(
-            `SELECT ID, Codigo, Nombre, Tipo, Departamento, Municipio, Estado 
-             FROM F_Sucursal 
-             WHERE Estado = 'ACTIVA' 
-             ORDER BY ID ASC`
+            soloCajero
+                ? `SELECT ID, Codigo, Nombre, Tipo, Departamento, Municipio, Estado
+                     FROM F_Sucursal
+                    WHERE Estado = 'ACTIVA' AND ID = :id
+                    ORDER BY ID ASC`
+                : `SELECT ID, Codigo, Nombre, Tipo, Departamento, Municipio, Estado
+                     FROM F_Sucursal
+                    WHERE Estado = 'ACTIVA'
+                    ORDER BY ID ASC`,
+            soloCajero ? { id: nbind(propia) } : {}
         )
         return res.json({ ok: true, total: result.rows?.length || 0, datos: result.rows || [] })
     } catch (error) {

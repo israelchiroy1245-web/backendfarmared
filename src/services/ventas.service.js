@@ -260,7 +260,8 @@ export async function emitirVenta({
     pagos,
     metodoPago = 'EFECTIVO',
     montoRecibido,
-    usuarioId
+    usuarioId,
+    rol
 }) {
     let conn
     try {
@@ -270,9 +271,15 @@ export async function emitirVenta({
         await setUsuario(conn, usuarioId)
 
         // 2. Validar que el usuario tenga empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
+            err.statusCode = 403
+            throw err
+        }
+        const empleadoId = empleado.id
+        if (String(rol || '').toUpperCase() === 'CAJERO' && num(empleado.sucursalId) !== num(sucursalId)) {
+            const err = new Error('El cajero solo puede cobrar en su sucursal asignada')
             err.statusCode = 403
             throw err
         }
@@ -600,8 +607,8 @@ export async function anularVenta(ventaId, usuarioId) {
         await setUsuario(conn, usuarioId)
 
         // 2. Validar que el usuario tenga empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
             err.statusCode = 403
             throw err
