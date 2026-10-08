@@ -3,6 +3,7 @@ import { oracledb } from '../config/database.js'
 import { num, nbind, errorOracle } from '../utils/oracle.js'
 import { ejecutarPagina, leerPaginacion, respuestaPaginada, terminoLike } from '../utils/paginacion.js'
 import { setUsuario } from '../services/sesion.js'
+import { revocarTodas } from '../services/sesionAuth.service.js'
 
 /**
  * GET /api/usuarios
@@ -333,6 +334,8 @@ export const actualizarUsuario = async (req, res) => {
             )
         }
 
+        if (estado === 'INACTIVO') await revocarTodas(conn, id)
+
         await conn.commit()
 
         return res.status(200).json({
@@ -402,6 +405,7 @@ export const cambiarPassword = async (req, res) => {
             return res.status(404).json({ ok: false, error: 'Usuario no encontrado' })
         }
 
+        await revocarTodas(conn, id)
         await conn.commit()
 
         return res.status(200).json({

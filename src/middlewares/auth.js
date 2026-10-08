@@ -36,7 +36,17 @@ export function requireRol(...roles) {
     }
 }
 
+export function firmarAccess(payload) {
+    return jwt.sign(payload, secreto(), {
+        expiresIn: process.env.JWT_EXPIRES || '15m',
+    })
+}
+
 export function firmarToken(payload) {
-    return jwt.sign(payload, secreto(), { expiresIn: process.env.JWT_EXPIRES || '8h' })
+    return firmarAccess(payload)
+}
+
+export function verificarAccess(token) {
+    return jwt.verify(token, secreto())
 }
 

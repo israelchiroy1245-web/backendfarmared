@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
+import { revocarTodas } from './sesionAuth.service.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
 
@@ -344,6 +345,8 @@ export async function cambiarEstadoEmpleado(id, nuevoEstado, adminId) {
             `UPDATE F_Usuarios SET Estado = :estado WHERE ID = :usrId`,
             { estado: estadoUpper, usrId: nbind(usuarioId) }
         )
+
+        if (estadoUpper === 'INACTIVO') await revocarTodas(conn, usuarioId)
 
         await conn.commit()
         return {
