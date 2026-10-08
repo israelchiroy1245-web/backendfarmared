@@ -34,6 +34,7 @@ export async function listarInventario(req, res) {
             resumen: {
                 bajos: Number(pagina.metrics?.BAJOS ?? 0),
                 vencidos: Number(pagina.metrics?.VENCIDOS ?? 0),
+                porVencer: Number(pagina.metrics?.POR_VENCER ?? 0),
             },
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
         })

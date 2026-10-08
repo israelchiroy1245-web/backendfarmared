@@ -29,10 +29,17 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
                 m.Laboratorio AS "LABORATORIO",
                 m.Precio_venta AS "PRECIO_VENTA",
                 m.Costo AS "COSTO",
+                m.Receta_requerida AS "RECETA_REQUERIDA",
                 CASE 
                     WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 1 
                     ELSE 0 
                 END AS "VENCIDO",
+                CASE
+                    WHEN i.Fecha_vencimiento IS NULL THEN 0
+                    WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 0
+                    WHEN i.Fecha_vencimiento <= TRUNC(SYSDATE) + 90 THEN 1
+                    ELSE 0
+                END AS "POR_VENCER",
                 CASE 
                     WHEN i.Cantidad <= i.Stock_minimo THEN 1 
                     ELSE 0 
@@ -87,7 +94,7 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
             orderBy: 'ORDER BY s.ID ASC, m.Nombre_medic ASC, i.Fecha_vencimiento ASC NULLS LAST',
             limit,
             offset,
-            resumenSelect: 'SUM("STOCK_BAJO") AS BAJOS, SUM("VENCIDO") AS VENCIDOS',
+            resumenSelect: 'SUM("STOCK_BAJO") AS BAJOS, SUM("VENCIDO") AS VENCIDOS, SUM("POR_VENCER") AS POR_VENCER',
         })
     } finally {
         if (conn) {
@@ -121,10 +128,17 @@ export async function consultarLotePorId(id) {
                 m.Laboratorio AS "LABORATORIO",
                 m.Precio_venta AS "PRECIO_VENTA",
                 m.Costo AS "COSTO",
+                m.Receta_requerida AS "RECETA_REQUERIDA",
                 CASE 
                     WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 1 
                     ELSE 0 
                 END AS "VENCIDO",
+                CASE
+                    WHEN i.Fecha_vencimiento IS NULL THEN 0
+                    WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 0
+                    WHEN i.Fecha_vencimiento <= TRUNC(SYSDATE) + 90 THEN 1
+                    ELSE 0
+                END AS "POR_VENCER",
                 CASE 
                     WHEN i.Cantidad <= i.Stock_minimo THEN 1 
                     ELSE 0 
