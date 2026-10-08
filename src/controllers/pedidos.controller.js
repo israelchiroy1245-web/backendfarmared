@@ -1,6 +1,7 @@
 import * as pedidosService from '../services/pedidos.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal } from '../utils/sucursalSesion.js'
 
 /**
  * POST /api/call-center/consulta o POST /api/call-center/consultar
@@ -37,7 +38,7 @@ export async function consultarCobertura(req, res) {
 export async function listarPedidos(req, res) {
     try {
         const estado = req.query.estado
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const clienteId = num(req.query.clienteId)
         const canal = req.query.canal
         const { limit, offset } = leerPaginacion(req.query)
@@ -59,6 +60,9 @@ export async function listarPedidos(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar pedidos:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })

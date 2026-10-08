@@ -1,6 +1,7 @@
 import * as comprasService from '../services/compras.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/compras
@@ -8,7 +9,7 @@ import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
  */
 export async function listarCompras(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const proveedorId = num(req.query.proveedorId)
         const fechaDesde = req.query.fechaDesde
         const fechaHasta = req.query.fechaHasta
@@ -32,6 +33,9 @@ export async function listarCompras(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar compras:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -68,7 +72,7 @@ export async function obtenerCompra(req, res) {
  */
 export async function registrarCompra(req, res) {
     try {
-        const sucursalId = num(req.body.sucursalId)
+        const sucursalId = resolverSucursal(req, req.body.sucursalId)
         const proveedorId = num(req.body.proveedorId)
         const numeroFactura = String(req.body.numeroFactura || '').trim()
         const lineas = req.body.lineas || req.body.items

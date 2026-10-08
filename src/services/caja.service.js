@@ -232,9 +232,14 @@ export async function abrirTurno({
         }
         const empleadoId = empleado.id
 
-        if (String(rol || '').toUpperCase() === 'CAJERO'
+        const rolTurno = String(rol || '').toUpperCase()
+        if ((rolTurno === 'CAJERO' || rolTurno === 'ENCARGADO')
             && num(empleado.sucursalId) !== num(sucursalId)) {
-            const err = new Error('El cajero solo puede abrir caja en su sucursal asignada')
+            const err = new Error(
+                rolTurno === 'CAJERO'
+                    ? 'El cajero solo puede abrir caja en su sucursal asignada'
+                    : 'Solo puede abrir caja en su sucursal asignada'
+            )
             err.statusCode = 403
             throw err
         }

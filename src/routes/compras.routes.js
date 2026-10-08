@@ -16,6 +16,6 @@ router.get('/', listarCompras)
 router.get('/:id', obtenerCompra)
 
 // Registro de compras vía SP procesar_compra (Exclusivo QF y ADMIN)
-router.post('/', requireRol('QF', 'ADMIN'), registrarCompra)
+router.post('/', requireRol('QF', 'ADMIN', 'ENCARGADO'), registrarCompra)
 
 export default router
