@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { oracledb } from '../config/database.js'
-import { num, errorOracle } from '../utils/oracle.js'
+import { num, nbind, errorOracle } from '../utils/oracle.js'
 import { ejecutarPagina, leerPaginacion, respuestaPaginada, terminoLike } from '../utils/paginacion.js'
 import { setUsuario } from '../services/sesion.js'
 
@@ -12,6 +12,7 @@ import { setUsuario } from '../services/sesion.js'
 export const listarUsuarios = async (req, res) => {
     const { limit, offset } = leerPaginacion(req.query)
     const q = terminoLike(req.query.q)
+    const sucursalId = num(req.query.sucursalId)
     let sql = `
             SELECT u.ID, u.Nombre, u.Apellido, u.Email, u.DPI, u.Telefono, u.Estado,
                 r.ID AS Rol_ID, r.Nombre AS Rol,
@@ -30,6 +31,10 @@ export const listarUsuarios = async (req, res) => {
             OR UPPER(e.Cargo) LIKE :q OR UPPER(s.Nombre) LIKE :q
         )`
         binds.q = q
+    }
+    if (sucursalId) {
+        sql += ` AND e.Sucursal_ID = :sucursalId`
+        binds.sucursalId = nbind(sucursalId)
     }
 
     let conn
