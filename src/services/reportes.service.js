@@ -583,6 +583,10 @@ export async function reporteAuditoria({ tabla, accion, desde, hasta, q, limit, 
             orderBy: 'ORDER BY a.Fecha DESC, a.ID DESC',
             limit,
             offset,
+            fetchInfo: {
+                DATOS_ANTERIORES: { type: oracledb.STRING },
+                DATOS_NUEVOS: { type: oracledb.STRING },
+            },
         })
     } finally {
         if (conn) {
