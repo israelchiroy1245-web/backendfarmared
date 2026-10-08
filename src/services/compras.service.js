@@ -174,12 +174,17 @@ export async function registrarCompra({
 
         // 3. Validar existencia del proveedor y sucursal
         const provCheck = await conn.execute(
-            `SELECT ID, Nombre FROM F_Proveedores WHERE ID = :p`,
+            `SELECT ID, Nombre, Estado FROM F_Proveedores WHERE ID = :p`,
             { p: nbind(proveedorId) }
         )
         if (!provCheck.rows || provCheck.rows.length === 0) {
             const err = new Error(`El proveedor con ID ${proveedorId} no existe`)
             err.statusCode = 404
+            throw err
+        }
+        if (String(provCheck.rows[0].ESTADO || '').toUpperCase() !== 'ACTIVO') {
+            const err = new Error('El proveedor está inactivo')
+            err.statusCode = 409
             throw err
         }
 

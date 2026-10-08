@@ -116,7 +116,10 @@ export async function catalogoProveedores(_req, res) {
     try {
         conn = await oracledb.getConnection()
         const result = await conn.execute(
-            `SELECT ID, Nombre, NIT, Telefono, Email FROM F_Proveedores ORDER BY Nombre ASC`
+            `SELECT ID, Nombre, NIT, Telefono, Email
+               FROM F_Proveedores
+              WHERE Estado = 'ACTIVO'
+              ORDER BY Nombre ASC`
         )
         return res.json({ ok: true, total: result.rows?.length || 0, datos: result.rows || [] })
     } catch (error) {
