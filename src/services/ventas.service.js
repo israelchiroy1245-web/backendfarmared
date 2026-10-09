@@ -598,7 +598,7 @@ export async function emitirVenta({
  * - Registra contra-movimiento en F_Movimiento_caja (ANULACION) y descuenta acumulados de F_Turno_caja
  * - Pasa estado de la venta a ANULADA
  */
-export async function anularVenta(ventaId, usuarioId) {
+export async function anularVenta(ventaId, usuarioId, { sucursalFijada = false, sucursalId = null } = {}) {
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -610,6 +610,22 @@ export async function anularVenta(ventaId, usuarioId) {
         const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
         if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
+            err.statusCode = 403
+            throw err
+        }
+
+        const ticket = await conn.execute(
+            `SELECT F_Sucursal_ID, Estado FROM F_Ventas WHERE ID = :id FOR UPDATE`,
+            { id: nbind(ventaId) },
+        )
+        const fila = ticket.rows?.[0]
+        if (!fila) {
+            const err = new Error('Venta no encontrada')
+            err.statusCode = 404
+            throw err
+        }
+        if (sucursalFijada && num(fila.F_SUCURSAL_ID) !== num(sucursalId)) {
+            const err = new Error('Solo puede operar en su sucursal asignada')
             err.statusCode = 403
             throw err
         }

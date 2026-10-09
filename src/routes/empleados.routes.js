@@ -13,9 +13,9 @@ const router = Router()
 // Todas las rutas de empleados requieren autenticación
 router.use(requireAuth)
 
-// Consulta (Cualquier usuario autenticado para ver datos de compañeros/sucursal)
-router.get('/', listarEmpleados)
-router.get('/:id', obtenerEmpleado)
+// Nómina: solo admin y auditor. El call center no lee salarios.
+router.get('/', requireRol('ADMIN', 'AUDITOR'), listarEmpleados)
+router.get('/:id', requireRol('ADMIN', 'AUDITOR'), obtenerEmpleado)
 
 // Modificación y gestión integral (Exclusivo ADMIN)
 router.post('/', requireRol('ADMIN'), crearEmpleado)

@@ -1,7 +1,7 @@
 import * as ventasService from '../services/ventas.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
-import { resolverSucursal, rolDe } from '../utils/sucursalSesion.js'
+import { resolverSucursal, rolDe, sucursalDelToken, sucursalFijadaEnApi } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/ventas
@@ -68,6 +68,13 @@ export async function obtenerVenta(req, res) {
         const venta = await ventasService.consultarVentaPorId(id)
         if (!venta) {
             return res.status(404).json({ ok: false, error: 'Venta no encontrada' })
+        }
+
+        if (sucursalFijadaEnApi(req)) {
+            const propia = sucursalDelToken(req)
+            if (!propia || num(venta.SUCURSAL_ID) !== propia) {
+                return res.status(403).json({ ok: false, error: 'Solo puede operar en su sucursal asignada' })
+            }
         }
 
         return res.json({ ok: true, datos: venta })
@@ -183,7 +190,10 @@ export async function anularVenta(req, res) {
             return res.status(401).json({ ok: false, error: 'No hay usuario autenticado en la sesión' })
         }
 
-        const resultado = await ventasService.anularVenta(id, usuarioId)
+        const resultado = await ventasService.anularVenta(id, usuarioId, {
+            sucursalFijada: sucursalFijadaEnApi(req),
+            sucursalId: sucursalDelToken(req),
+        })
 
         return res.json({
             ok: true,
