@@ -139,7 +139,6 @@ export const obtenerRol = async (req, res) => {
 export const crearRol = async (req, res) => {
     const nombre = String(req.body.nombre || '').trim().toUpperCase()
     const descripcion = req.body.descripcion ? String(req.body.descripcion).trim() : null
-    const permisosIds = Array.isArray(req.body.permisos) ? req.body.permisos.map(num).filter((p) => p != null) : []
 
     if (!nombre) {
         return res.status(400).json({ ok: false, error: 'El nombre del rol es obligatorio' })
@@ -166,18 +165,6 @@ export const crearRol = async (req, res) => {
         )
 
         const rolId = Array.isArray(resRol.outBinds.id) ? resRol.outBinds.id[0] : resRol.outBinds.id
-
-        // 2. Insertar permisos en F_rol_permiso si se enviaron
-        for (const permisoId of permisosIds) {
-            await conn.execute(
-                `INSERT INTO F_rol_permiso (Roles_ID, Permisos_ID)
-                 VALUES (:rolId, :permisoId)`,
-                {
-                    rolId: { val: rolId, type: oracledb.NUMBER },
-                    permisoId: { val: permisoId, type: oracledb.NUMBER }
-                }
-            )
-        }
 
         await conn.commit()
 
@@ -214,7 +201,6 @@ export const actualizarRol = async (req, res) => {
 
     const nombre = req.body.nombre ? String(req.body.nombre).trim().toUpperCase() : null
     const descripcion = req.body.descripcion !== undefined ? (req.body.descripcion ? String(req.body.descripcion).trim() : null) : null
-    const permisosIds = Array.isArray(req.body.permisos) ? req.body.permisos.map(num).filter((p) => p != null) : null
 
     let conn
     try {
@@ -248,25 +234,6 @@ export const actualizarRol = async (req, res) => {
                 id: { val: id, type: oracledb.NUMBER }
             }
         )
-
-        // 3. Si se envió el arreglo de permisos, actualizar la tabla intermedia F_rol_permiso
-        if (permisosIds !== null) {
-            await conn.execute(
-                `DELETE FROM F_rol_permiso WHERE Roles_ID = :id`,
-                { id: { val: id, type: oracledb.NUMBER } }
-            )
-
-            for (const permisoId of permisosIds) {
-                await conn.execute(
-                    `INSERT INTO F_rol_permiso (Roles_ID, Permisos_ID)
-                     VALUES (:rolId, :permisoId)`,
-                    {
-                        rolId: { val: id, type: oracledb.NUMBER },
-                        permisoId: { val: permisoId, type: oracledb.NUMBER }
-                    }
-                )
-            }
-        }
 
         await conn.commit()
 
