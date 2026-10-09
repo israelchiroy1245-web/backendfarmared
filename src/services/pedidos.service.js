@@ -272,11 +272,11 @@ export async function consultarPedidos({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(c.Nombre || ' ' || NVL(c.Apellido, '')) LIKE :q
-                OR UPPER(c.NIT) LIKE :q
-                OR UPPER(p.Direccion_entrega) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
-                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
+                UPPER(c.Nombre || ' ' || NVL(c.Apellido, '')) LIKE :q ESCAPE '\\'
+                OR UPPER(c.NIT) LIKE :q ESCAPE '\\'
+                OR UPPER(p.Direccion_entrega) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

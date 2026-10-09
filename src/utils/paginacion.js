@@ -22,7 +22,10 @@ export function respuestaPaginada({ total, limit, offset }) {
 
 /** Texto de búsqueda para LIKE. Vacío si no hay término. */
 export function terminoLike(q) {
-    const clean = String(q || '').trim().toUpperCase().replace(/[%_\\]/g, '')
+    const clean = String(q || '').trim().toUpperCase()
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
     if (!clean) return null
     return `%${clean}%`
 }
@@ -31,7 +34,7 @@ export function terminoLike(q) {
  * Ejecuta el conteo del SQL (sin ORDER BY) y la página con OFFSET/FETCH.
  * `resumenSelect` suma columnas del subquery, por ejemplo `SUM("STOCK_BAJO") AS BAJOS`.
  */
-export async function ejecutarPagina(conn, { sql, binds = {}, orderBy, limit, offset, resumenSelect = '' }) {
+export async function ejecutarPagina(conn, { sql, binds = {}, orderBy, limit, offset, resumenSelect = '', fetchInfo } = {}) {
     const extra = resumenSelect ? `, ${resumenSelect}` : ''
     const countResult = await conn.execute(
         `SELECT COUNT(*) AS TOTAL${extra} FROM (${sql}) pagina_src`,
@@ -47,6 +50,7 @@ export async function ejecutarPagina(conn, { sql, binds = {}, orderBy, limit, of
             paginaOffset: nbind(offset),
             paginaLimit: nbind(limit),
         },
+        fetchInfo ? { fetchInfo } : {},
     )
 
     return { rows: pageResult.rows || [], total, metrics }

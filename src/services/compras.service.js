@@ -2,6 +2,7 @@ import { oracledb } from '../config/database.js'
 import { setUsuario, empleadoActivoDeUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+import { assertMedicamentoActivo } from './medicamentos.service.js'
 
 /**
  * Listado de compras con filtros
@@ -58,9 +59,9 @@ export async function consultarCompras({ sucursalId, proveedorId, fechaDesde, fe
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(c.Numero_Factura) LIKE :q
-                OR UPPER(p.Nombre) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
+                UPPER(c.Numero_Factura) LIKE :q ESCAPE '\\'
+                OR UPPER(p.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -164,21 +165,27 @@ export async function registrarCompra({
         await setUsuario(conn, usuarioId)
 
         // 2. Validar que el usuario tenga empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
             err.statusCode = 403
             throw err
         }
+        const empleadoId = empleado.id
 
         // 3. Validar existencia del proveedor y sucursal
         const provCheck = await conn.execute(
-            `SELECT ID, Nombre FROM F_Proveedores WHERE ID = :p`,
+            `SELECT ID, Nombre, Estado FROM F_Proveedores WHERE ID = :p`,
             { p: nbind(proveedorId) }
         )
         if (!provCheck.rows || provCheck.rows.length === 0) {
             const err = new Error(`El proveedor con ID ${proveedorId} no existe`)
             err.statusCode = 404
+            throw err
+        }
+        if (String(provCheck.rows[0].ESTADO || '').toUpperCase() !== 'ACTIVO') {
+            const err = new Error('El proveedor está inactivo')
+            err.statusCode = 409
             throw err
         }
 
@@ -251,6 +258,7 @@ export async function registrarCompra({
                 err.statusCode = 400
                 throw err
             }
+            await assertMedicamentoActivo(conn, medId)
 
             // Llamar al procedimiento almacenado de Oracle
             await conn.execute(

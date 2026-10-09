@@ -4,16 +4,19 @@ import cors from "cors";
 import { initializePool, closePool } from './src/config/database.js';
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const origenes = String(process.env.CORS_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+app.use(cors({
+    origin: origenes,
+    credentials: false,
+}));
+app.use(express.json({ limit: '100kb' }));
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 import authRoutes from './src/routes/auth.routes.js'
 app.use('/api/auth', authRoutes)
-
-//Rutas de Ventas
-import ventasRoutes from './src/routes/ventas.routes.js'
-app.use('/api/ventas', ventasRoutes)
 
 //Rutas de Dashboard
 import dashboardRoutes from './src/routes/dashboard.routes.js'
@@ -51,17 +54,24 @@ app.use('/api/compras', comprasRoutes)
 import proveedoresRoutes from './src/routes/proveedores.routes.js'
 app.use('/api/proveedores', proveedoresRoutes)
 
-//Rutas de Transferencias (Módulo 5)
+import medicamentosRoutes from './src/routes/medicamentos.routes.js'
+app.use('/api/medicamentos', medicamentosRoutes)
+
+//Rutas de Caja & Turnos (Módulo 4) — antes que el POS
+import cajaRoutes from './src/routes/caja.routes.js'
+app.use('/api/caja', cajaRoutes)
+
+//Rutas de Ventas POS (Módulo 5)
+import ventasRoutes from './src/routes/ventas.routes.js'
+app.use('/api/ventas', ventasRoutes)
+
+//Rutas de Transferencias
 import transferenciasRoutes from './src/routes/transferencias.routes.js'
 app.use('/api/transferencias', transferenciasRoutes)
 
 //Rutas de Catálogos de Apoyo
 import catalogosRoutes from './src/routes/catalogos.routes.js'
 app.use('/api/catalogos', catalogosRoutes)
-
-//Rutas de Caja & Turnos (Módulo 6)
-import cajaRoutes from './src/routes/caja.routes.js'
-app.use('/api/caja', cajaRoutes)
 
 //Rutas de Planilla (Módulo 7)
 import planillaRoutes from './src/routes/planilla.routes.js'
@@ -82,6 +92,9 @@ app.use('/api/reportes', reportesRoutes)
 
 //Inicia servidor y base de datos
 async function startServer() {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+        throw new Error('JWT_SECRET es obligatorio y debe tener al menos 32 caracteres')
+    }
     await initializePool();
 
     const PORT = process.env.PORT || 3000;

@@ -1,9 +1,5 @@
 import { Router } from 'express'
-import {
-    listarPermisos,
-    crearPermiso,
-    eliminarPermiso
-} from '../controllers/permisos.controller.js'
+import { listarPermisos } from '../controllers/permisos.controller.js'
 import { requireAuth, requireRol } from '../middlewares/auth.js'
 
 const router = Router()
@@ -12,7 +8,5 @@ const router = Router()
 router.use(requireAuth, requireRol('ADMIN'))
 
 router.get('/', listarPermisos)
-router.post('/', crearPermiso)
-router.delete('/:id', eliminarPermiso)
 
 export default router

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
+import { revocarTodas } from './sesionAuth.service.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
 
@@ -51,8 +52,8 @@ export async function consultarEmpleados({ sucursalId, estado, q, limit, offset 
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(u.Nombre) LIKE :q OR UPPER(u.Apellido) LIKE :q OR UPPER(u.Email) LIKE :q
-                OR UPPER(e.Cargo) LIKE :q OR UPPER(s.Nombre) LIKE :q
+                UPPER(u.Nombre) LIKE :q ESCAPE '\\' OR UPPER(u.Apellido) LIKE :q ESCAPE '\\' OR UPPER(u.Email) LIKE :q ESCAPE '\\'
+                OR UPPER(e.Cargo) LIKE :q ESCAPE '\\' OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -344,6 +345,8 @@ export async function cambiarEstadoEmpleado(id, nuevoEstado, adminId) {
             `UPDATE F_Usuarios SET Estado = :estado WHERE ID = :usrId`,
             { estado: estadoUpper, usrId: nbind(usuarioId) }
         )
+
+        if (estadoUpper === 'INACTIVO') await revocarTodas(conn, usuarioId)
 
         await conn.commit()
         return {

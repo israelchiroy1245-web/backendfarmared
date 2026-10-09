@@ -10,9 +10,14 @@ const connectString =
     `${process.env.ORACLE_HOST || 'localhost'}:${process.env.ORACLE_PORT || 1521}/${process.env.ORACLE_SERVICE || 'XEPDB1'}`
 
 export async function initializePool() {
+    const user = process.env.DB_USER
+    const password = process.env.DB_PASSWORD
+    if (!user || !password) {
+        throw new Error('DB_USER y DB_PASSWORD son obligatorios')
+    }
     await oracledb.createPool({
-        user: process.env.DB_USER || 'farmred',
-        password: process.env.DB_PASSWORD || 'farmred',
+        user,
+        password,
         connectString,
         poolMin: 1,
         poolMax: 8,

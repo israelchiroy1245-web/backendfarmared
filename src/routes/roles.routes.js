@@ -6,10 +6,7 @@ import {
     crearRol,
     actualizarRol,
     eliminarRol,
-    obtenerPermisosDeRol,
-    asignarPermisosARol,
-    sincronizarPermisosDeRol,
-    removerPermisoDeRol
+    obtenerPermisosDeRol
 } from '../controllers/roles.controller.js'
 import { requireAuth, requireRol } from '../middlewares/auth.js'
 
@@ -26,10 +23,6 @@ router.post('/', crearRol)
 router.put('/:id', actualizarRol)
 router.delete('/:id', eliminarRol)
 
-// Asignación y gestión de permisos por Rol
 router.get('/:id/permisos', obtenerPermisosDeRol)
-router.post('/:id/permisos', asignarPermisosARol)
-router.put('/:id/permisos', sincronizarPermisosDeRol)
-router.delete('/:id/permisos/:permisoId', removerPermisoDeRol)
 
 export default router

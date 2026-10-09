@@ -71,8 +71,8 @@ export async function consultarTurnos({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(s.Nombre) LIKE :q
-                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
+                UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -190,8 +190,9 @@ export async function consultarTurnoActivo(usuarioId) {
     let conn
     try {
         conn = await oracledb.getConnection()
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) return null
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) return null
+        const empleadoId = empleado.id
 
         const res = await conn.execute(
             `SELECT ID FROM F_Turno_caja WHERE F_Empleados_ID = :emp AND Estado = 'ABIERTA'`,
@@ -214,7 +215,8 @@ export async function consultarTurnoActivo(usuarioId) {
 export async function abrirTurno({
     sucursalId,
     montoInicial,
-    usuarioId
+    usuarioId,
+    rol
 }) {
     let conn
     try {
@@ -222,9 +224,22 @@ export async function abrirTurno({
         await setUsuario(conn, usuarioId)
 
         // Validar empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
+            err.statusCode = 403
+            throw err
+        }
+        const empleadoId = empleado.id
+
+        const rolTurno = String(rol || '').toUpperCase()
+        if ((rolTurno === 'CAJERO' || rolTurno === 'ENCARGADO')
+            && num(empleado.sucursalId) !== num(sucursalId)) {
+            const err = new Error(
+                rolTurno === 'CAJERO'
+                    ? 'El cajero solo puede abrir caja en su sucursal asignada'
+                    : 'Solo puede abrir caja en su sucursal asignada'
+            )
             err.statusCode = 403
             throw err
         }
@@ -350,8 +365,8 @@ export async function registrarMovimientoCaja(turnoId, {
         await setUsuario(conn, usuarioId)
 
         const tipoUpper = String(tipo).toUpperCase()
-        if (!['VENTA', 'GASTO', 'RETIRO', 'DEPOSITO', 'AJUSTE'].includes(tipoUpper)) {
-            const err = new Error('Tipo de movimiento inválido (VENTA, GASTO, RETIRO, DEPOSITO, AJUSTE)')
+        if (!['GASTO', 'RETIRO', 'DEPOSITO'].includes(tipoUpper)) {
+            const err = new Error('Tipo de movimiento inválido. Use GASTO, RETIRO o DEPOSITO. La venta la registra el POS.')
             err.statusCode = 400
             throw err
         }
@@ -442,9 +457,6 @@ export async function registrarMovimientoCaja(turnoId, {
  */
 export async function cerrarTurno(turnoId, {
     montoContado,
-    ventasEfectivo,
-    ventasTarjeta,
-    gastos,
     usuarioId
 }) {
     let conn
@@ -481,14 +493,14 @@ export async function cerrarTurno(turnoId, {
             throw err
         }
 
-        // Si no se envían ventasEfectivo o gastos explícitos, tomamos los registrados o calculamos
         const inicial = Number(turno.MONTO_INICIAL) || 0
-        const vEfectivo = num(ventasEfectivo) !== null ? num(ventasEfectivo) : (Number(turno.VENTAS_EFECTIVO) || 0)
-        const vTarjeta = num(ventasTarjeta) !== null ? num(ventasTarjeta) : (Number(turno.VENTAS_TARJETA) || 0)
-        const gsts = num(gastos) !== null ? num(gastos) : (Number(turno.GASTOS) || 0)
+        const vEfectivo = Number(turno.VENTAS_EFECTIVO) || 0
+        const vTarjeta = Number(turno.VENTAS_TARJETA) || 0
+        const gsts = Number(turno.GASTOS) || 0
 
         // Obtener ID del empleado que está cerrando
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        const empleadoId = empleado?.id
 
         // Fórmula rectora de arqueo:
         // esperadoEnCaja = inicial + ventas_efectivo - gastos
@@ -499,23 +511,15 @@ export async function cerrarTurno(turnoId, {
         // Actualizar turno a CERRADA con foto de auditoría
         await conn.execute(
             `UPDATE F_Turno_caja
-             SET Monto_contado = :contado,
-                 Ventas_efectivo = :vEf,
-                 Ventas_tarjeta = :vTarj,
-                 Gastos = :gastos,
-                 Total_esperado = :esperado,
-                 Diferencia = :dif,
+             SET Fecha_cierre = SYSTIMESTAMP,
                  Cerrado_por = :cerrador,
-                 Estado = 'CERRADA',
-                 Fecha_cierre = SYSTIMESTAMP
+                 Total_esperado = Monto_inicial + Ventas_efectivo - Gastos,
+                 Monto_contado = :contado,
+                 Diferencia = :contado - (Monto_inicial + Ventas_efectivo - Gastos),
+                 Estado = 'CERRADA'
              WHERE ID = :id AND Estado = 'ABIERTA'`,
             {
                 contado: nbind(contado),
-                vEf: nbind(vEfectivo),
-                vTarj: nbind(vTarjeta),
-                gastos: nbind(gsts),
-                esperado: nbind(esperadoEnCaja),
-                dif: nbind(diferencia),
                 cerrador: empleadoId ? nbind(empleadoId) : null,
                 id: nbind(turnoId)
             }

@@ -2,6 +2,7 @@ import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+import { assertMedicamentoActivo } from './medicamentos.service.js'
 
 /**
  * Consulta de inventario/lotes con detalles de medicamento y sucursal
@@ -29,10 +30,17 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
                 m.Laboratorio AS "LABORATORIO",
                 m.Precio_venta AS "PRECIO_VENTA",
                 m.Costo AS "COSTO",
+                m.Receta_requerida AS "RECETA_REQUERIDA",
                 CASE 
                     WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 1 
                     ELSE 0 
                 END AS "VENCIDO",
+                CASE
+                    WHEN i.Fecha_vencimiento IS NULL THEN 0
+                    WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 0
+                    WHEN i.Fecha_vencimiento <= TRUNC(SYSDATE) + 90 THEN 1
+                    ELSE 0
+                END AS "POR_VENCER",
                 CASE 
                     WHEN i.Cantidad <= i.Stock_minimo THEN 1 
                     ELSE 0 
@@ -72,11 +80,11 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(i.Lote) LIKE :q
-                OR UPPER(m.Nombre_medic) LIKE :q
-                OR UPPER(m.Codigo_barra) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
-                OR UPPER(s.Codigo) LIKE :q
+                UPPER(i.Lote) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Nombre_medic) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Codigo_barra) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Codigo) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -87,7 +95,7 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
             orderBy: 'ORDER BY s.ID ASC, m.Nombre_medic ASC, i.Fecha_vencimiento ASC NULLS LAST',
             limit,
             offset,
-            resumenSelect: 'SUM("STOCK_BAJO") AS BAJOS, SUM("VENCIDO") AS VENCIDOS',
+            resumenSelect: 'SUM("STOCK_BAJO") AS BAJOS, SUM("VENCIDO") AS VENCIDOS, SUM("POR_VENCER") AS POR_VENCER',
         })
     } finally {
         if (conn) {
@@ -121,10 +129,17 @@ export async function consultarLotePorId(id) {
                 m.Laboratorio AS "LABORATORIO",
                 m.Precio_venta AS "PRECIO_VENTA",
                 m.Costo AS "COSTO",
+                m.Receta_requerida AS "RECETA_REQUERIDA",
                 CASE 
                     WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 1 
                     ELSE 0 
                 END AS "VENCIDO",
+                CASE
+                    WHEN i.Fecha_vencimiento IS NULL THEN 0
+                    WHEN i.Fecha_vencimiento < TRUNC(SYSDATE) THEN 0
+                    WHEN i.Fecha_vencimiento <= TRUNC(SYSDATE) + 90 THEN 1
+                    ELSE 0
+                END AS "POR_VENCER",
                 CASE 
                     WHEN i.Cantidad <= i.Stock_minimo THEN 1 
                     ELSE 0 
@@ -192,11 +207,11 @@ export async function consultarKardex({ sucursalId, medicamentoId, tipo, q, limi
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(k.Lote) LIKE :q
-                OR UPPER(k.Tipo) LIKE :q
-                OR UPPER(k.Referencia) LIKE :q
-                OR UPPER(m.Nombre_medic) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
+                UPPER(k.Lote) LIKE :q ESCAPE '\\'
+                OR UPPER(k.Tipo) LIKE :q ESCAPE '\\'
+                OR UPPER(k.Referencia) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Nombre_medic) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -231,6 +246,7 @@ export async function crearLote({
     try {
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
+        await assertMedicamentoActivo(conn, medicamentoId)
 
         // Verificar existencia previa del lote en la sucursal
         const check = await conn.execute(

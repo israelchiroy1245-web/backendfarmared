@@ -161,7 +161,8 @@ export async function reporteVentas({ sucursalId, fechaInicio, fechaFin }) {
                 NVL(SUM(v.Total), 0) AS TOTAL_VENTAS,
                 NVL(SUM(
                     (SELECT SUM(p.Monto) FROM F_Venta_pago p WHERE p.F_Ventas_ID = v.ID AND p.Metodo_pago = 'EFECTIVO')
-                ), 0) AS VENTAS_EFECTIVO,
+                ), 0) - NVL(SUM(v.Vuelto), 0) AS VENTAS_EFECTIVO,
+                NVL(SUM(v.Vuelto), 0) AS VUELTO,
                 NVL(SUM(
                     (SELECT SUM(p.Monto) FROM F_Venta_pago p WHERE p.F_Ventas_ID = v.ID AND p.Metodo_pago = 'TARJETA')
                 ), 0) AS VENTAS_TARJETA,
@@ -207,41 +208,58 @@ export async function reporteVentas({ sucursalId, fechaInicio, fechaFin }) {
 /**
  * Reporte de Inventario FEFO y alertas de vencimiento
  */
-export async function reporteInventarioFefo({ sucursalId, diasVencimiento = 90 }) {
+export async function reporteInventarioFefo({ sucursalId, diasVencimiento = 90, q, limit, offset }) {
     let conn
     try {
         conn = await oracledb.getConnection()
 
         let sql = `
             SELECT 
-                i.ID AS LOTE_ID,
-                i.Lote AS LOTE,
-                TO_CHAR(i.Fecha_vencimiento, 'YYYY-MM-DD') AS FECHA_VENCIMIENTO,
-                ROUND(i.Fecha_vencimiento - TRUNC(SYSDATE)) AS DIAS_RESTANTES,
-                i.Cantidad AS CANTIDAD,
-                m.ID AS MEDICAMENTO_ID,
-                m.Nombre_medic AS MEDICAMENTO_NOMBRE,
-                m.Codigo_barra AS SKU,
-                m.Costo AS COSTO_UNITARIO,
-                (i.Cantidad * m.Costo) AS VALOR_COSTO,
-                s.ID AS SUCURSAL_ID,
-                s.Nombre AS SUCURSAL_NOMBRE
+                i.ID AS "LOTE_ID",
+                i.Lote AS "LOTE",
+                TO_CHAR(i.Fecha_vencimiento, 'YYYY-MM-DD') AS "FECHA_VENCIMIENTO",
+                ROUND(i.Fecha_vencimiento - TRUNC(SYSDATE)) AS "DIAS_RESTANTES",
+                i.Cantidad AS "CANTIDAD",
+                m.ID AS "MEDICAMENTO_ID",
+                m.Nombre_medic AS "MEDICAMENTO_NOMBRE",
+                m.Codigo_barra AS "SKU",
+                m.Costo AS "COSTO_UNITARIO",
+                (i.Cantidad * m.Costo) AS "VALOR_COSTO",
+                s.ID AS "SUCURSAL_ID",
+                s.Nombre AS "SUCURSAL_NOMBRE"
             FROM F_Inventario i
             JOIN F_Medicamentos m ON m.ID = i.F_Medicamentos_ID
             JOIN F_Sucursal s ON s.ID = i.F_Sucursal_ID
             WHERE i.Fecha_vencimiento <= TRUNC(SYSDATE) + :dias
-            ORDER BY i.Fecha_vencimiento ASC
         `
-        const res = await conn.execute(sql, { dias: nbind(diasVencimiento) })
-        const lotes = res.rows || []
+        const binds = { dias: nbind(diasVencimiento) }
+        if (sucursalId) {
+            sql += ` AND i.F_Sucursal_ID = :sucId`
+            binds.sucId = nbind(sucursalId)
+        }
+        const busqueda = terminoLike(q)
+        if (busqueda) {
+            sql += ` AND (
+                UPPER(m.Nombre_medic) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Codigo_barra) LIKE :q ESCAPE '\\'
+                OR UPPER(i.Lote) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+            )`
+            binds.q = busqueda
+        }
 
-        const totalRiesgo = lotes.reduce((sum, l) => sum + (Number(l.VALOR_COSTO) || 0), 0)
-
+        const pagina = await ejecutarPagina(conn, {
+            sql,
+            binds,
+            orderBy: 'ORDER BY i.Fecha_vencimiento ASC, i.ID ASC',
+            limit,
+            offset,
+            resumenSelect: 'NVL(SUM("VALOR_COSTO"), 0) AS VALOR_RIESGO',
+        })
         return {
+            ...pagina,
             filtroDias: diasVencimiento,
-            totalLotesProximos: lotes.length,
-            valorEnRiesgo: Math.round(totalRiesgo * 100) / 100,
-            lotes
+            valorEnRiesgo: Math.round((Number(pagina.metrics?.VALOR_RIESGO) || 0) * 100) / 100,
         }
     } finally {
         if (conn) {
@@ -253,7 +271,7 @@ export async function reporteInventarioFefo({ sucursalId, diasVencimiento = 90 }
 /**
  * Reporte de Auditoría de Cajas y Arqueos (Faltantes y Sobrantes)
  */
-export async function reporteArqueoCajas({ sucursalId, desde, hasta, fechaDesde, fechaHasta }) {
+export async function reporteArqueoCajas({ sucursalId, desde, hasta, fechaDesde, fechaHasta, estado }) {
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -281,9 +299,13 @@ export async function reporteArqueoCajas({ sucursalId, desde, hasta, fechaDesde,
             JOIN F_Empleados e ON e.ID = t.F_Empleados_ID
             JOIN F_Usuarios u ON u.ID = e.Usuarios_ID
             LEFT JOIN F_Usuarios ua ON ua.ID = t.Auditor
-            WHERE t.Estado IN ('CERRADA', 'AUDITADA')
+            WHERE 1 = 1
         `
         const binds = {}
+        if (estado) {
+            sql += ` AND t.Estado = :estado`
+            binds.estado = String(estado).toUpperCase().trim()
+        }
         if (sucursalId) {
             sql += ` AND t.F_Sucursal_ID = :sucId`
             binds.sucId = nbind(sucursalId)
@@ -499,10 +521,10 @@ export async function reporteKardex({ sucursalId, medicamentoId, tipo, desde, ha
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(med.Nombre_medic) LIKE :q
-                OR UPPER(m.Lote) LIKE :q
-                OR UPPER(NVL(m.Referencia, '')) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
+                UPPER(med.Nombre_medic) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Lote) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(m.Referencia, '')) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -571,8 +593,11 @@ export async function reporteAuditoria({ tabla, accion, desde, hasta, q, limit, 
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(a.Tabla_afectada) LIKE :q
-                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q
+                UPPER(a.Tabla_afectada) LIKE :q ESCAPE '\\'
+                OR UPPER(a.Accion) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(a.Datos_nuevos, '')) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(a.Datos_anteriores, '')) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -583,6 +608,10 @@ export async function reporteAuditoria({ tabla, accion, desde, hasta, q, limit, 
             orderBy: 'ORDER BY a.Fecha DESC, a.ID DESC',
             limit,
             offset,
+            fetchInfo: {
+                DATOS_ANTERIORES: { type: oracledb.STRING },
+                DATOS_NUEVOS: { type: oracledb.STRING },
+            },
         })
     } finally {
         if (conn) {

@@ -1,19 +1,28 @@
 import { oracledb } from '../config/database.js'
-import { errorOracle } from '../utils/oracle.js'
+import { errorOracle, nbind } from '../utils/oracle.js'
+import { rolDe, sucursalDelToken } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/catalogos/sucursales
  * Lista simplificada de sucursales activas para combos y selectores
  */
-export async function catalogoSucursales(_req, res) {
+export async function catalogoSucursales(req, res) {
     let conn
     try {
         conn = await oracledb.getConnection()
+        const propia = sucursalDelToken(req)
+        const soloCajero = rolDe(req) === 'CAJERO' && propia
         const result = await conn.execute(
-            `SELECT ID, Codigo, Nombre, Tipo, Departamento, Municipio, Estado 
-             FROM F_Sucursal 
-             WHERE Estado = 'ACTIVA' 
-             ORDER BY ID ASC`
+            soloCajero
+                ? `SELECT ID, Codigo, Nombre, Tipo, Departamento, Municipio, Estado
+                     FROM F_Sucursal
+                    WHERE Estado = 'ACTIVA' AND ID = :id
+                    ORDER BY ID ASC`
+                : `SELECT ID, Codigo, Nombre, Tipo, Departamento, Municipio, Estado
+                     FROM F_Sucursal
+                    WHERE Estado = 'ACTIVA'
+                    ORDER BY ID ASC`,
+            soloCajero ? { id: nbind(propia) } : {}
         )
         return res.json({ ok: true, total: result.rows?.length || 0, datos: result.rows || [] })
     } catch (error) {
@@ -46,7 +55,8 @@ export async function catalogoMedicamentos(_req, res) {
                 Receta_requerida AS "RECETA_REQUERIDA", 
                 Precio_venta AS "PRECIO_VENTA", 
                 Costo AS "COSTO"
-             FROM F_Medicamentos 
+             FROM F_Medicamentos
+             WHERE Estado = 'ACTIVO'
              ORDER BY Nombre_medic ASC`
         )
         return res.json({ ok: true, total: result.rows?.length || 0, datos: result.rows || [] })
@@ -107,7 +117,10 @@ export async function catalogoProveedores(_req, res) {
     try {
         conn = await oracledb.getConnection()
         const result = await conn.execute(
-            `SELECT ID, Nombre, NIT, Telefono, Email FROM F_Proveedores ORDER BY Nombre ASC`
+            `SELECT ID, Nombre, NIT, Telefono, Email
+               FROM F_Proveedores
+              WHERE Estado = 'ACTIVO'
+              ORDER BY Nombre ASC`
         )
         return res.json({ ok: true, total: result.rows?.length || 0, datos: result.rows || [] })
     } catch (error) {

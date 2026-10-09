@@ -63,10 +63,10 @@ export async function consultarActivos({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(a.Codigo) LIKE :q 
-                OR UPPER(a.Nombre) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
-                OR UPPER(a.Categoria) LIKE :q
+                UPPER(a.Codigo) LIKE :q ESCAPE '\\' 
+                OR UPPER(a.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(a.Categoria) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

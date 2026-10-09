@@ -21,9 +21,9 @@ router.get('/kardex', listarKardex) // Definir antes de /:id
 router.get('/:id', obtenerLote)
 
 // Operaciones de modificación (Exclusivo QF y ADMIN)
-router.post('/', requireRol('QF', 'ADMIN'), crearLote)
-router.put('/:id', requireRol('QF', 'ADMIN'), actualizarLote)
-router.patch('/:id', requireRol('QF', 'ADMIN'), ajustarStock)
-router.delete('/:id', requireRol('QF', 'ADMIN'), eliminarLote)
+router.post('/', requireRol('QF', 'ADMIN', 'ENCARGADO'), crearLote)
+router.put('/:id', requireRol('QF', 'ADMIN', 'ENCARGADO'), actualizarLote)
+router.patch('/:id', requireRol('QF', 'ADMIN', 'ENCARGADO'), ajustarStock)
+router.delete('/:id', requireRol('QF', 'ADMIN', 'ENCARGADO'), eliminarLote)
 
 export default router

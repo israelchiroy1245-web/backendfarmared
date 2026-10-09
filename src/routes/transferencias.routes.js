@@ -19,9 +19,9 @@ router.get('/', listarTransferencias)
 router.get('/:id', obtenerTransferencia)
 
 // Flujo de estados y gestión de transferencias (QF y ADMIN)
-router.post('/', requireRol('QF', 'ADMIN'), crearTransferencia)
-router.patch('/:id/enviar', requireRol('QF', 'ADMIN'), enviarTransferencia)
-router.patch('/:id/recibir', requireRol('QF', 'ADMIN'), recibirTransferencia)
-router.patch('/:id/cancelar', requireRol('QF', 'ADMIN'), cancelarTransferencia)
+router.post('/', requireRol('QF', 'ADMIN', 'ENCARGADO'), crearTransferencia)
+router.patch('/:id/enviar', requireRol('QF', 'ADMIN', 'ENCARGADO'), enviarTransferencia)
+router.patch('/:id/recibir', requireRol('QF', 'ADMIN', 'ENCARGADO'), recibirTransferencia)
+router.patch('/:id/cancelar', requireRol('QF', 'ADMIN', 'ENCARGADO'), cancelarTransferencia)
 
 export default router

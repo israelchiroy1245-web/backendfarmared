@@ -1,8 +1,9 @@
 import bcrypt from 'bcryptjs'
 import { oracledb } from '../config/database.js'
-import { num, errorOracle } from '../utils/oracle.js'
+import { num, nbind, errorOracle } from '../utils/oracle.js'
 import { ejecutarPagina, leerPaginacion, respuestaPaginada, terminoLike } from '../utils/paginacion.js'
 import { setUsuario } from '../services/sesion.js'
+import { revocarTodas } from '../services/sesionAuth.service.js'
 
 /**
  * GET /api/usuarios
@@ -12,6 +13,7 @@ import { setUsuario } from '../services/sesion.js'
 export const listarUsuarios = async (req, res) => {
     const { limit, offset } = leerPaginacion(req.query)
     const q = terminoLike(req.query.q)
+    const sucursalId = num(req.query.sucursalId)
     let sql = `
             SELECT u.ID, u.Nombre, u.Apellido, u.Email, u.DPI, u.Telefono, u.Estado,
                 r.ID AS Rol_ID, r.Nombre AS Rol,
@@ -25,11 +27,15 @@ export const listarUsuarios = async (req, res) => {
     const binds = {}
     if (q) {
         sql += ` AND (
-            UPPER(u.Nombre) LIKE :q OR UPPER(u.Apellido) LIKE :q OR UPPER(u.Email) LIKE :q
-            OR UPPER(u.DPI) LIKE :q OR UPPER(u.Telefono) LIKE :q OR UPPER(r.Nombre) LIKE :q
-            OR UPPER(e.Cargo) LIKE :q OR UPPER(s.Nombre) LIKE :q
+            UPPER(u.Nombre) LIKE :q ESCAPE '\\' OR UPPER(u.Apellido) LIKE :q ESCAPE '\\' OR UPPER(u.Email) LIKE :q ESCAPE '\\'
+            OR UPPER(u.DPI) LIKE :q ESCAPE '\\' OR UPPER(u.Telefono) LIKE :q ESCAPE '\\' OR UPPER(r.Nombre) LIKE :q ESCAPE '\\'
+            OR UPPER(e.Cargo) LIKE :q ESCAPE '\\' OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
         )`
         binds.q = q
+    }
+    if (sucursalId) {
+        sql += ` AND e.Sucursal_ID = :sucursalId`
+        binds.sucursalId = nbind(sucursalId)
     }
 
     let conn
@@ -176,19 +182,19 @@ export const crearUsuario = async (req, res) => {
         if (cargo && salario != null && sucursalId != null) {
             const resultEmpleado = await conn.execute(
                 `INSERT INTO F_Empleados (Cargo, Salario, Estado, Usuarios_ID, Sucursal_ID)
-                 VALUES (:cargo, :salario, 'ACTIVO', :uid, :suc)
-                 RETURNING ID INTO :id`,
+                 VALUES (:cargo, :salario, 'ACTIVO', :usuarioId, :sucursalId)
+                 RETURNING ID INTO :empleadoId`,
                 {
                     cargo,
                     salario: { val: salario, type: oracledb.NUMBER },
-                    uid: { val: idUsuarioCreado, type: oracledb.NUMBER },
-                    suc: { val: sucursalId, type: oracledb.NUMBER },
-                    id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+                    usuarioId: { val: idUsuarioCreado, type: oracledb.NUMBER },
+                    sucursalId: { val: sucursalId, type: oracledb.NUMBER },
+                    empleadoId: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
                 }
             )
-            empleadoId = Array.isArray(resultEmpleado.outBinds.id)
-                ? resultEmpleado.outBinds.id[0]
-                : resultEmpleado.outBinds.id
+            empleadoId = Array.isArray(resultEmpleado.outBinds.empleadoId)
+                ? resultEmpleado.outBinds.empleadoId[0]
+                : resultEmpleado.outBinds.empleadoId
         }
 
         await conn.commit()
@@ -317,16 +323,18 @@ export const actualizarUsuario = async (req, res) => {
         } else if (cargo && salario != null && sucursalId != null) {
             await conn.execute(
                 `INSERT INTO F_Empleados (Cargo, Salario, Estado, Usuarios_ID, Sucursal_ID)
-                 VALUES (:cargo, :salario, :estado, :uid, :suc)`,
+                 VALUES (:cargo, :salario, :estadoEmp, :usuarioId, :sucursalId)`,
                 {
                     cargo,
                     salario: { val: salario, type: oracledb.NUMBER },
-                    estado: estado ?? 'ACTIVO',
-                    uid: { val: id, type: oracledb.NUMBER },
-                    suc: { val: sucursalId, type: oracledb.NUMBER }
+                    estadoEmp: estado ?? 'ACTIVO',
+                    usuarioId: { val: id, type: oracledb.NUMBER },
+                    sucursalId: { val: sucursalId, type: oracledb.NUMBER }
                 }
             )
         }
+
+        if (estado === 'INACTIVO') await revocarTodas(conn, id)
 
         await conn.commit()
 
@@ -397,6 +405,7 @@ export const cambiarPassword = async (req, res) => {
             return res.status(404).json({ ok: false, error: 'Usuario no encontrado' })
         }
 
+        await revocarTodas(conn, id)
         await conn.commit()
 
         return res.status(200).json({
@@ -406,58 +415,6 @@ export const cambiarPassword = async (req, res) => {
     } catch (error) {
         if (conn) try { await conn.rollback() } catch { /* ignore */ }
         console.error('Error al cambiar contraseña:', error.message)
-        const mapped = errorOracle(error)
-        return res.status(mapped.status).json({ ok: false, error: mapped.error })
-    } finally {
-        if (conn) try { await conn.close() } catch { /* ignore */ }
-    }
-}
-
-/**
- * DELETE /api/usuarios/:id
- * Baja lógica: Desactiva el usuario y su empleado (Estado = 'INACTIVO').
- * No realiza DELETE físico para mantener la integridad referencial y auditoría.
- */
-export const eliminarUsuario = async (req, res) => {
-    const id = num(req.params.id)
-    if (!id) {
-        return res.status(400).json({ ok: false, error: 'ID de usuario inválido' })
-    }
-
-    let conn
-    try {
-        conn = await oracledb.getConnection()
-
-        // 1. Auditoría
-        if (req.usuario?.id) {
-            await setUsuario(conn, req.usuario.id)
-        }
-
-        // 2. Baja lógica en F_Usuarios
-        const resU = await conn.execute(
-            `UPDATE F_Usuarios SET Estado = 'INACTIVO' WHERE ID = :id`,
-            { id: { val: id, type: oracledb.NUMBER } }
-        )
-
-        if (resU.rowsAffected === 0) {
-            return res.status(404).json({ ok: false, error: 'Usuario no encontrado' })
-        }
-
-        // 3. Baja lógica en F_Empleados (si tiene registro asociado)
-        await conn.execute(
-            `UPDATE F_Empleados SET Estado = 'INACTIVO' WHERE Usuarios_ID = :id`,
-            { id: { val: id, type: oracledb.NUMBER } }
-        )
-
-        await conn.commit()
-
-        return res.status(200).json({
-            ok: true,
-            mensaje: 'Usuario desactivado exitosamente'
-        })
-    } catch (error) {
-        if (conn) try { await conn.rollback() } catch { /* ignore */ }
-        console.error('Error al desactivar usuario:', error.message)
         const mapped = errorOracle(error)
         return res.status(mapped.status).json({ ok: false, error: mapped.error })
     } finally {

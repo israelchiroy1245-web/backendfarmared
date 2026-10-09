@@ -13,6 +13,7 @@ export async function listarProveedores(req, res) {
 
         const pagina = await proveedoresService.consultarProveedores({
             q,
+            estado: req.query.estado,
             limit,
             offset
         })
@@ -109,7 +110,7 @@ export async function actualizarProveedor(req, res) {
             return res.status(400).json({ ok: false, error: 'ID de proveedor inválido' })
         }
 
-        const { nombre, nit, telefono, direccion, email } = req.body
+        const { nombre, nit, telefono, direccion, email, estado } = req.body
         const usuarioId = req.usuario?.id
 
         const resultado = await proveedoresService.actualizarProveedor(id, {
@@ -118,6 +119,7 @@ export async function actualizarProveedor(req, res) {
             telefono,
             direccion,
             email,
+            estado,
             usuarioId
         })
 
@@ -138,7 +140,7 @@ export async function actualizarProveedor(req, res) {
 
 /**
  * DELETE /api/proveedores/:id
- * Eliminación de proveedor (solo si no tiene facturas registradas)
+ * Baja lógica: Estado = INACTIVO. No borra la fila.
  */
 export async function eliminarProveedor(req, res) {
     try {
@@ -152,7 +154,7 @@ export async function eliminarProveedor(req, res) {
 
         return res.json({
             ok: true,
-            mensaje: 'Proveedor eliminado exitosamente',
+            mensaje: 'Proveedor desactivado',
             datos: resultado
         })
     } catch (error) {

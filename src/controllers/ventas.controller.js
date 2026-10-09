@@ -1,6 +1,7 @@
 import * as ventasService from '../services/ventas.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal, rolDe, sucursalDelToken, sucursalFijadaEnApi } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/ventas
@@ -8,7 +9,7 @@ import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
  */
 export async function listarVentas(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const empleadoId = num(req.query.empleadoId)
         const clienteId = num(req.query.clienteId)
         const metodoPago = req.query.metodoPago
@@ -44,6 +45,9 @@ export async function listarVentas(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar ventas:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -66,6 +70,13 @@ export async function obtenerVenta(req, res) {
             return res.status(404).json({ ok: false, error: 'Venta no encontrada' })
         }
 
+        if (sucursalFijadaEnApi(req)) {
+            const propia = sucursalDelToken(req)
+            if (!propia || num(venta.SUCURSAL_ID) !== propia) {
+                return res.status(403).json({ ok: false, error: 'Solo puede operar en su sucursal asignada' })
+            }
+        }
+
         return res.json({ ok: true, datos: venta })
     } catch (error) {
         console.error('Error al obtener venta:', error.message)
@@ -85,7 +96,7 @@ export async function obtenerVenta(req, res) {
  */
 export async function registrarVenta(req, res) {
     try {
-        const sucursalId = num(req.body.sucursalId)
+        const sucursalId = resolverSucursal(req, req.body.sucursalId)
         const turnoId = num(req.body.turnoId)
         const serie = req.body.serie || 'A'
         const tipoDoc = req.body.tipoDoc || 'TICKET'
@@ -102,7 +113,7 @@ export async function registrarVenta(req, res) {
         const metodoPago = req.body.metodoPago || 'EFECTIVO'
         const montoRecibido = req.body.montoRecibido !== undefined ? num(req.body.montoRecibido) : undefined
 
-        const usuarioId = num(req.usuario?.id ?? req.body.cajeroId ?? process.env.CAJERO_ID_PRUEBA)
+        const usuarioId = num(req.usuario?.id)
 
         if (!sucursalId) {
             return res.status(400).json({ ok: false, error: 'sucursalId es obligatorio' })
@@ -141,7 +152,8 @@ export async function registrarVenta(req, res) {
             pagos,
             metodoPago,
             montoRecibido,
-            usuarioId
+            usuarioId,
+            rol: rolDe(req),
         })
 
         return res.status(201).json({
@@ -173,12 +185,15 @@ export async function anularVenta(req, res) {
             return res.status(400).json({ ok: false, error: 'ID de venta inválido' })
         }
 
-        const usuarioId = num(req.usuario?.id ?? req.body.cajeroId ?? process.env.CAJERO_ID_PRUEBA)
+        const usuarioId = num(req.usuario?.id)
         if (!usuarioId) {
             return res.status(401).json({ ok: false, error: 'No hay usuario autenticado en la sesión' })
         }
 
-        const resultado = await ventasService.anularVenta(id, usuarioId)
+        const resultado = await ventasService.anularVenta(id, usuarioId, {
+            sucursalFijada: sucursalFijadaEnApi(req),
+            sucursalId: sucursalDelToken(req),
+        })
 
         return res.json({
             ok: true,

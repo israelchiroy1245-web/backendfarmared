@@ -2,6 +2,7 @@ import { oracledb } from '../config/database.js'
 import { setUsuario, empleadoActivoDeUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+import { assertMedicamentoActivo } from './medicamentos.service.js'
 
 /**
  * Consulta listado de ventas con filtros y paginación
@@ -121,12 +122,12 @@ export async function consultarVentas({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(s.Nombre) LIKE :q
-                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
-                OR UPPER(NVL(cli.Nombre || ' ' || NVL(cli.Apellido, ''), '')) LIKE :q
-                OR UPPER(v.Numero) LIKE :q
-                OR UPPER(v.Nit) LIKE :q
-                OR UPPER(NVL(v.Nombre_factura, '')) LIKE :q
+                UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(cli.Nombre || ' ' || NVL(cli.Apellido, ''), '')) LIKE :q ESCAPE '\\'
+                OR UPPER(v.Numero) LIKE :q ESCAPE '\\'
+                OR UPPER(v.Nit) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(v.Nombre_factura, '')) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -245,6 +246,35 @@ export async function consultarVentaPorId(id) {
  * 5. Registra los pagos en F_Venta_pago (3FN)
  * 6. Aplica venta a caja (movimiento de caja, acumulación en turno, cálculo de vuelto) con aplicar_venta_a_caja
  */
+function normalizarPagos(pagos) {
+    if (!Array.isArray(pagos) || pagos.length === 0) {
+        const err = new Error('Indique efectivo, tarjeta o transferencia')
+        err.statusCode = 400
+        throw err
+    }
+    const lista = []
+    for (const p of pagos) {
+        const metodo = String(p.metodoPago || p.metodo || '').toUpperCase().trim()
+        const monto = num(p.monto)
+        if (!['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].includes(metodo)) {
+            const err = new Error('Indique efectivo, tarjeta o transferencia')
+            err.statusCode = 400
+            throw err
+        }
+        if (!monto || monto <= 0) {
+            const err = new Error('El monto de cada pago debe ser mayor a 0')
+            err.statusCode = 400
+            throw err
+        }
+        lista.push({
+            metodo,
+            monto,
+            referencia: p.referencia ? String(p.referencia).trim() : null,
+        })
+    }
+    return lista
+}
+
 export async function emitirVenta({
     sucursalId,
     turnoId,
@@ -258,10 +288,11 @@ export async function emitirVenta({
     precio,
     lineas,
     pagos,
-    metodoPago = 'EFECTIVO',
     montoRecibido,
-    usuarioId
+    usuarioId,
+    rol
 }) {
+    const listaPagos = normalizarPagos(pagos)
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -270,9 +301,15 @@ export async function emitirVenta({
         await setUsuario(conn, usuarioId)
 
         // 2. Validar que el usuario tenga empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
+            err.statusCode = 403
+            throw err
+        }
+        const empleadoId = empleado.id
+        if (String(rol || '').toUpperCase() === 'CAJERO' && num(empleado.sucursalId) !== num(sucursalId)) {
+            const err = new Error('El cajero solo puede cobrar en su sucursal asignada')
             err.statusCode = 403
             throw err
         }
@@ -294,6 +331,30 @@ export async function emitirVenta({
 
         if (!turnoCajaId) {
             const err = new Error('La venta POS requiere un turno de caja abierto en la sucursal')
+            err.statusCode = 409
+            throw err
+        }
+
+        const resTurnoLock = await conn.execute(
+            `SELECT ID, Estado, F_Sucursal_ID
+               FROM F_Turno_caja
+              WHERE ID = :turnoCajaId
+                FOR UPDATE`,
+            { turnoCajaId: nbind(turnoCajaId) }
+        )
+        const turnoRow = resTurnoLock.rows?.[0]
+        if (!turnoRow) {
+            const err = new Error('No se encontró el turno de caja')
+            err.statusCode = 404
+            throw err
+        }
+        if (String(turnoRow.ESTADO || '').toUpperCase() !== 'ABIERTA') {
+            const err = new Error('La venta POS requiere un turno de caja abierto')
+            err.statusCode = 409
+            throw err
+        }
+        if (num(turnoRow.F_SUCURSAL_ID) !== num(sucursalId)) {
+            const err = new Error('El turno no pertenece a la sucursal de la venta')
             err.statusCode = 409
             throw err
         }
@@ -415,6 +476,7 @@ export async function emitirVenta({
 
         // 8. Procesar descuento FEFO por cada ítem usando procesar_venta
         for (const item of itemsAProcesar) {
+            await assertMedicamentoActivo(conn, item.medicamentoId)
             await conn.execute(
                 `BEGIN
                     procesar_venta(
@@ -443,42 +505,11 @@ export async function emitirVenta({
         const cabeceraCalculada = resTotalVenta.rows?.[0] || { SUBTOTAL: 0, IVA: 0, TOTAL: 0 }
         const totalVenta = Number(cabeceraCalculada.TOTAL)
 
-        // 10. Normalizar e insertar formas de pago en F_Venta_pago (3FN)
-        const listaPagos = []
-        if (Array.isArray(pagos) && pagos.length > 0) {
-            for (const p of pagos) {
-                const metodo = String(p.metodoPago || p.metodo || 'EFECTIVO').toUpperCase().trim()
-                const monto = num(p.monto)
-                if (!['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].includes(metodo)) {
-                    const err = new Error(`Método de pago no válido: ${metodo}`)
-                    err.statusCode = 400
-                    throw err
-                }
-                if (!monto || monto <= 0) {
-                    const err = new Error('El monto de cada pago debe ser mayor a 0')
-                    err.statusCode = 400
-                    throw err
-                }
-                listaPagos.push({
-                    metodo,
-                    monto,
-                    referencia: p.referencia ? String(p.referencia).trim() : null
-                })
-            }
-        } else {
-            // Un solo pago por defecto con metodoPago provisto o deducido
-            const metodoUnico = String(metodoPago || 'EFECTIVO').toUpperCase().trim()
-            if (!['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].includes(metodoUnico)) {
-                const err = new Error(`Método de pago no válido: ${metodoUnico}`)
-                err.statusCode = 400
-                throw err
-            }
-            // En efectivo se registra el total exacto de la venta (el excedente es vuelto)
-            listaPagos.push({
-                metodo: metodoUnico,
-                monto: totalVenta,
-                referencia: null
-            })
+        // 10. Insertar formas de pago en F_Venta_pago (3FN). Sin pagos no se cobra.
+        if (listaPagos.reduce((suma, p) => suma + p.monto, 0) + 0.001 < totalVenta) {
+            const err = new Error('Los pagos no cubren el total del ticket')
+            err.statusCode = 400
+            throw err
         }
 
         // Insertar cada pago en F_Venta_pago
@@ -567,7 +598,7 @@ export async function emitirVenta({
  * - Registra contra-movimiento en F_Movimiento_caja (ANULACION) y descuenta acumulados de F_Turno_caja
  * - Pasa estado de la venta a ANULADA
  */
-export async function anularVenta(ventaId, usuarioId) {
+export async function anularVenta(ventaId, usuarioId, { sucursalFijada = false, sucursalId = null } = {}) {
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -576,9 +607,25 @@ export async function anularVenta(ventaId, usuarioId) {
         await setUsuario(conn, usuarioId)
 
         // 2. Validar que el usuario tenga empleado activo
-        const empleadoId = await empleadoActivoDeUsuario(conn, usuarioId)
-        if (!empleadoId) {
+        const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+        if (!empleado) {
             const err = new Error('El usuario no tiene un empleado activo asignado')
+            err.statusCode = 403
+            throw err
+        }
+
+        const ticket = await conn.execute(
+            `SELECT F_Sucursal_ID, Estado FROM F_Ventas WHERE ID = :id FOR UPDATE`,
+            { id: nbind(ventaId) },
+        )
+        const fila = ticket.rows?.[0]
+        if (!fila) {
+            const err = new Error('Venta no encontrada')
+            err.statusCode = 404
+            throw err
+        }
+        if (sucursalFijada && num(fila.F_SUCURSAL_ID) !== num(sucursalId)) {
+            const err = new Error('Solo puede operar en su sucursal asignada')
             err.statusCode = 403
             throw err
         }

@@ -1,7 +1,34 @@
 import { oracledb } from '../config/database.js'
-import { setUsuario } from './sesion.js'
+import { empleadoActivoDeUsuario, setUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+
+function esRolLocal(rol) {
+    const r = String(rol || '').toUpperCase()
+    return r === 'ENCARGADO' || r === 'QF'
+}
+
+async function sucursalDelEmpleado(conn, usuarioId, rol) {
+    if (!esRolLocal(rol)) return null
+    const empleado = await empleadoActivoDeUsuario(conn, usuarioId)
+    const propia = num(empleado?.sucursalId)
+    if (!propia) {
+        const err = new Error('El usuario no tiene sucursal asignada')
+        err.statusCode = 403
+        throw err
+    }
+    return propia
+}
+
+async function sucursalesDeTransferencia(conn, id) {
+    const cur = await conn.execute(
+        `SELECT Sucursal_origen_ID AS "ORIGEN", Sucursal_destino_ID AS "DESTINO"
+           FROM F_Transferencia
+          WHERE ID = :id`,
+        { id: nbind(id) }
+    )
+    return cur.rows?.[0] || null
+}
 
 /**
  * Consulta de transferencias con filtros y paginación estándar
@@ -81,12 +108,12 @@ export async function consultarTransferencias({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(so.Nombre) LIKE :q
-                OR UPPER(sd.Nombre) LIKE :q
-                OR UPPER(so.Codigo) LIKE :q
-                OR UPPER(sd.Codigo) LIKE :q
-                OR UPPER(NVL(t.Observacion, '')) LIKE :q
-                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q
+                UPPER(so.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(sd.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(so.Codigo) LIKE :q ESCAPE '\\'
+                OR UPPER(sd.Codigo) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(t.Observacion, '')) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -175,12 +202,20 @@ export async function crearTransferencia({
     destinoId,
     observacion,
     lineas,
-    usuarioId
+    usuarioId,
+    rol
 }) {
     let conn
     try {
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
+
+        const propia = await sucursalDelEmpleado(conn, usuarioId, rol)
+        if (propia && num(origenId) !== propia) {
+            const err = new Error('Solo puede operar en su sucursal asignada')
+            err.statusCode = 403
+            throw err
+        }
 
         if (Number(origenId) === Number(destinoId)) {
             const err = new Error('La sucursal de origen debe ser diferente a la sucursal de destino')
@@ -281,11 +316,26 @@ export async function crearTransferencia({
 /**
  * Enviar transferencia (Estado EN_TRANSITO): Descuenta de origen vía FEFO mediante procesar_transferencia_envio
  */
-export async function enviarTransferencia(id, usuarioId) {
+export async function enviarTransferencia(id, usuarioId, rol) {
     let conn
     try {
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
+
+        const propia = await sucursalDelEmpleado(conn, usuarioId, rol)
+        if (propia) {
+            const fila = await sucursalesDeTransferencia(conn, id)
+            if (!fila) {
+                const err = new Error('No se encontró la transferencia')
+                err.statusCode = 404
+                throw err
+            }
+            if (num(fila.ORIGEN) !== propia) {
+                const err = new Error('Solo el encargado del origen puede enviar')
+                err.statusCode = 403
+                throw err
+            }
+        }
 
         // Ejecutar Stored Procedure de Oracle
         await conn.execute(
@@ -317,11 +367,26 @@ export async function enviarTransferencia(id, usuarioId) {
 /**
  * Recibir transferencia (Estado RECIBIDA): Suma stock en destino mediante procesar_transferencia_recepcion
  */
-export async function recibirTransferencia(id, usuarioId) {
+export async function recibirTransferencia(id, usuarioId, rol) {
     let conn
     try {
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
+
+        const propia = await sucursalDelEmpleado(conn, usuarioId, rol)
+        if (propia) {
+            const fila = await sucursalesDeTransferencia(conn, id)
+            if (!fila) {
+                const err = new Error('No se encontró la transferencia')
+                err.statusCode = 404
+                throw err
+            }
+            if (num(fila.DESTINO) !== propia) {
+                const err = new Error('Solo el encargado del destino puede recibir')
+                err.statusCode = 403
+                throw err
+            }
+        }
 
         // Ejecutar Stored Procedure de Oracle
         await conn.execute(
@@ -353,11 +418,26 @@ export async function recibirTransferencia(id, usuarioId) {
 /**
  * Cancelar transferencia: Solo permitido si sigue en estado SOLICITADA
  */
-export async function cancelarTransferencia(id, usuarioId) {
+export async function cancelarTransferencia(id, usuarioId, rol) {
     let conn
     try {
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
+
+        const propia = await sucursalDelEmpleado(conn, usuarioId, rol)
+        if (propia) {
+            const fila = await sucursalesDeTransferencia(conn, id)
+            if (!fila) {
+                const err = new Error('No se encontró la transferencia')
+                err.statusCode = 404
+                throw err
+            }
+            if (num(fila.ORIGEN) !== propia) {
+                const err = new Error('Solo el encargado del origen puede cancelar')
+                err.statusCode = 403
+                throw err
+            }
+        }
 
         const cur = await conn.execute(
             `SELECT Estado FROM F_Transferencia WHERE ID = :id FOR UPDATE`,

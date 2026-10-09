@@ -1,6 +1,7 @@
 import * as activosService from '../services/activos.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/activos
@@ -8,7 +9,7 @@ import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
  */
 export async function listarActivos(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const categoria = req.query.categoria
         const estado = req.query.estado
         const q = req.query.q
@@ -39,6 +40,9 @@ export async function listarActivos(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar activos:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })

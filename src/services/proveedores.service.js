@@ -6,7 +6,7 @@ import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
 /**
  * Consulta de proveedores con paginación y búsqueda
  */
-export async function consultarProveedores({ q, limit, offset }) {
+export async function consultarProveedores({ q, estado, limit, offset }) {
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -19,16 +19,22 @@ export async function consultarProveedores({ q, limit, offset }) {
                 p.Telefono AS "TELEFONO",
                 p.Direccion AS "DIRECCION",
                 p.Email AS "EMAIL",
+                p.Estado AS "ESTADO",
                 (SELECT COUNT(*) FROM F_Compras c WHERE c.F_Proveedores_Id = p.ID) AS "TOTAL_COMPRAS"
             FROM F_Proveedores p
             WHERE 1 = 1
         `
 
         const binds = {}
+        const estadoFiltro = String(estado || '').trim().toUpperCase()
+        if (estadoFiltro === 'ACTIVO' || estadoFiltro === 'INACTIVO') {
+            sql += ` AND p.Estado = :estado`
+            binds.estado = estadoFiltro
+        }
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(p.Nombre) LIKE :q OR UPPER(p.NIT) LIKE :q OR UPPER(p.Email) LIKE :q
+                UPPER(p.Nombre) LIKE :q ESCAPE '\\' OR UPPER(p.NIT) LIKE :q ESCAPE '\\' OR UPPER(p.Email) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -63,6 +69,7 @@ export async function consultarProveedorPorId(id) {
                 p.Telefono AS "TELEFONO",
                 p.Direccion AS "DIRECCION",
                 p.Email AS "EMAIL",
+                p.Estado AS "ESTADO",
                 (SELECT COUNT(*) FROM F_Compras c WHERE c.F_Proveedores_Id = p.ID) AS "TOTAL_COMPRAS"
             FROM F_Proveedores p
             WHERE p.ID = :id
@@ -128,9 +135,9 @@ export async function crearProveedor({
 
         const sql = `
             INSERT INTO F_Proveedores (
-                Nombre, NIT, Telefono, Direccion, Email
+                Nombre, NIT, Telefono, Direccion, Email, Estado
             ) VALUES (
-                :nombre, :nit, :telefono, :direccion, :email
+                :nombre, :nit, :telefono, :direccion, :email, 'ACTIVO'
             ) RETURNING ID INTO :id
         `
         const res = await conn.execute(sql, {
@@ -151,7 +158,8 @@ export async function crearProveedor({
             nit: nitLimpio,
             telefono: telefono || null,
             direccion: direccion || null,
-            email: email || null
+            email: email || null,
+            estado: 'ACTIVO'
         }
     } catch (error) {
         if (conn) {
@@ -174,6 +182,7 @@ export async function actualizarProveedor(id, {
     telefono,
     direccion,
     email,
+    estado,
     usuarioId
 }) {
     let conn
@@ -183,7 +192,7 @@ export async function actualizarProveedor(id, {
 
         // Consultar estado actual
         const cur = await conn.execute(
-            `SELECT ID, Nombre, NIT, Telefono, Direccion, Email FROM F_Proveedores WHERE ID = :id FOR UPDATE`,
+            `SELECT ID, Nombre, NIT, Telefono, Direccion, Email, Estado FROM F_Proveedores WHERE ID = :id FOR UPDATE`,
             { id: nbind(id) }
         )
         const actual = cur.rows?.[0]
@@ -232,6 +241,25 @@ export async function actualizarProveedor(id, {
             updates.push('Email = :email')
             binds.email = email ? String(email).trim().toLowerCase() : null
         }
+        if (estado !== undefined) {
+            const nuevoEstado = String(estado).trim().toUpperCase()
+            if (nuevoEstado !== 'ACTIVO' && nuevoEstado !== 'INACTIVO') {
+                const err = new Error('El estado debe ser ACTIVO o INACTIVO')
+                err.statusCode = 400
+                throw err
+            }
+            if (nuevoEstado === String(actual.ESTADO || '').toUpperCase()) {
+                const err = new Error(
+                    nuevoEstado === 'ACTIVO'
+                        ? 'El proveedor ya está activo'
+                        : 'El proveedor ya está inactivo'
+                )
+                err.statusCode = 409
+                throw err
+            }
+            updates.push('Estado = :estado')
+            binds.estado = nuevoEstado
+        }
 
         if (updates.length > 0) {
             await conn.execute(
@@ -249,6 +277,7 @@ export async function actualizarProveedor(id, {
             telefono: telefono !== undefined ? telefono : actual.TELEFONO,
             direccion: direccion !== undefined ? direccion : actual.DIRECCION,
             email: email !== undefined ? email : actual.EMAIL,
+            estado: estado !== undefined ? String(estado).trim().toUpperCase() : actual.ESTADO,
             mensaje: 'Proveedor actualizado correctamente'
         }
     } catch (error) {
@@ -264,8 +293,7 @@ export async function actualizarProveedor(id, {
 }
 
 /**
- * Eliminar proveedor
- * Regla: Solo si no tiene facturas de compras registradas en F_Compras
+ * Baja lógica: Estado = INACTIVO. La fila y las facturas se quedan.
  */
 export async function eliminarProveedor(id, usuarioId) {
     let conn
@@ -274,11 +302,10 @@ export async function eliminarProveedor(id, usuarioId) {
         await setUsuario(conn, usuarioId)
 
         const cur = await conn.execute(
-            `SELECT ID, Nombre, 
-                    (SELECT COUNT(*) FROM F_Compras c WHERE c.F_Proveedores_Id = p.ID) AS TOTAL_COMPRAS 
-             FROM F_Proveedores p 
-             WHERE ID = :id 
-             FOR UPDATE`,
+            `SELECT ID, Nombre AS "NOMBRE", Estado AS "ESTADO"
+               FROM F_Proveedores
+              WHERE ID = :id
+              FOR UPDATE`,
             { id: nbind(id) }
         )
         const prov = cur.rows?.[0]
@@ -288,16 +315,19 @@ export async function eliminarProveedor(id, usuarioId) {
             throw err
         }
 
-        if (prov.TOTAL_COMPRAS > 0) {
-            const err = new Error(`No se puede eliminar el proveedor "${prov.NOMBRE}" porque tiene ${prov.TOTAL_COMPRAS} factura(s) de compras registrada(s)`)
+        if (prov.ESTADO === 'INACTIVO') {
+            const err = new Error('El proveedor ya está inactivo')
             err.statusCode = 409
             throw err
         }
 
-        await conn.execute(`DELETE FROM F_Proveedores WHERE ID = :id`, { id: nbind(id) })
+        await conn.execute(
+            `UPDATE F_Proveedores SET Estado = 'INACTIVO' WHERE ID = :id`,
+            { id: nbind(id) }
+        )
         await conn.commit()
 
-        return { id, nombre: prov.NOMBRE, eliminado: true }
+        return { id, nombre: prov.NOMBRE, estado: 'INACTIVO', eliminado: false }
     } catch (error) {
         if (conn) {
             try { await conn.rollback() } catch (_) {}

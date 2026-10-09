@@ -22,8 +22,8 @@ router.post('/pedido', requireRol('CALL_CENTER', 'ADMIN'), crearPedido)
 router.post('/', requireRol('CALL_CENTER', 'ADMIN'), crearPedido)
 
 // Consulta de pedidos
-router.get('/', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO'), listarPedidos)
-router.get('/:id', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO'), obtenerPedido)
+router.get('/', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO', 'ENCARGADO', 'AUDITOR'), listarPedidos)
+router.get('/:id', requireRol('CALL_CENTER', 'ADMIN', 'QF', 'CAJERO', 'ENCARGADO', 'AUDITOR'), obtenerPedido)
 
 // Actualización del ciclo logístico del pedido
 router.patch('/:id', requireRol('CALL_CENTER', 'ADMIN', 'QF'), cambiarEstadoPedido)

@@ -1,6 +1,7 @@
 import * as transferenciasService from '../services/transferencias.service.js'
 import { errorOracle, num } from '../utils/oracle.js'
 import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
+import { resolverSucursal, rolDe, sucursalDelToken, sucursalFijadaEnApi } from '../utils/sucursalSesion.js'
 
 /**
  * GET /api/transferencias
@@ -8,7 +9,7 @@ import { leerPaginacion, respuestaPaginada } from '../utils/paginacion.js'
  */
 export async function listarTransferencias(req, res) {
     try {
-        const sucursalId = num(req.query.sucursalId)
+        const sucursalId = resolverSucursal(req, req.query.sucursalId)
         const origenId = num(req.query.origenId)
         const destinoId = num(req.query.destinoId)
         const estado = req.query.estado
@@ -35,6 +36,9 @@ export async function listarTransferencias(req, res) {
             paginacion: respuestaPaginada({ total: pagina.total, limit, offset })
         })
     } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ ok: false, error: error.message })
+        }
         console.error('Error al listar transferencias:', error.message)
         const err = errorOracle(error)
         return res.status(err.status).json({ ok: false, error: err.error })
@@ -55,6 +59,15 @@ export async function obtenerTransferencia(req, res) {
         const transferencia = await transferenciasService.consultarTransferenciaPorId(id)
         if (!transferencia) {
             return res.status(404).json({ ok: false, error: 'Transferencia no encontrada' })
+        }
+
+        if (sucursalFijadaEnApi(req)) {
+            const propia = sucursalDelToken(req)
+            const origen = num(transferencia.SUCURSAL_ORIGEN_ID)
+            const destino = num(transferencia.SUCURSAL_DESTINO_ID)
+            if (!propia || (origen !== propia && destino !== propia)) {
+                return res.status(403).json({ ok: false, error: 'Solo puede operar en su sucursal asignada' })
+            }
         }
 
         return res.json({ ok: true, datos: transferencia })
@@ -103,7 +116,8 @@ export async function crearTransferencia(req, res) {
             destinoId,
             observacion,
             lineas,
-            usuarioId
+            usuarioId,
+            rol: rolDe(req)
         })
 
         return res.status(201).json({
@@ -133,7 +147,7 @@ export async function enviarTransferencia(req, res) {
         }
 
         const usuarioId = req.usuario?.id
-        const resultado = await transferenciasService.enviarTransferencia(id, usuarioId)
+        const resultado = await transferenciasService.enviarTransferencia(id, usuarioId, rolDe(req))
 
         return res.json({
             ok: true,
@@ -162,7 +176,7 @@ export async function recibirTransferencia(req, res) {
         }
 
         const usuarioId = req.usuario?.id
-        const resultado = await transferenciasService.recibirTransferencia(id, usuarioId)
+        const resultado = await transferenciasService.recibirTransferencia(id, usuarioId, rolDe(req))
 
         return res.json({
             ok: true,
@@ -191,7 +205,7 @@ export async function cancelarTransferencia(req, res) {
         }
 
         const usuarioId = req.usuario?.id
-        const resultado = await transferenciasService.cancelarTransferencia(id, usuarioId)
+        const resultado = await transferenciasService.cancelarTransferencia(id, usuarioId, rolDe(req))
 
         return res.json({
             ok: true,
