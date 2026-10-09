@@ -4,8 +4,12 @@ import cors from "cors";
 import { initializePool, closePool } from './src/config/database.js';
 
 const app = express();
+const origenes = String(process.env.CORS_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: origenes,
     credentials: false,
 }));
 app.use(express.json({ limit: '100kb' }));
@@ -88,6 +92,9 @@ app.use('/api/reportes', reportesRoutes)
 
 //Inicia servidor y base de datos
 async function startServer() {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+        throw new Error('JWT_SECRET es obligatorio y debe tener al menos 32 caracteres')
+    }
     await initializePool();
 
     const PORT = process.env.PORT || 3000;
