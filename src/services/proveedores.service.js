@@ -34,7 +34,7 @@ export async function consultarProveedores({ q, estado, limit, offset }) {
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(p.Nombre) LIKE :q OR UPPER(p.NIT) LIKE :q OR UPPER(p.Email) LIKE :q
+                UPPER(p.Nombre) LIKE :q ESCAPE '\\' OR UPPER(p.NIT) LIKE :q ESCAPE '\\' OR UPPER(p.Email) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

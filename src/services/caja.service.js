@@ -71,8 +71,8 @@ export async function consultarTurnos({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(s.Nombre) LIKE :q
-                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
+                UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

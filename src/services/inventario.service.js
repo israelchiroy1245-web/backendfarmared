@@ -80,11 +80,11 @@ export async function consultarInventario({ sucursalId, medicamentoId, alertaBaj
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(i.Lote) LIKE :q
-                OR UPPER(m.Nombre_medic) LIKE :q
-                OR UPPER(m.Codigo_barra) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
-                OR UPPER(s.Codigo) LIKE :q
+                UPPER(i.Lote) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Nombre_medic) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Codigo_barra) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Codigo) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
@@ -207,11 +207,11 @@ export async function consultarKardex({ sucursalId, medicamentoId, tipo, q, limi
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(k.Lote) LIKE :q
-                OR UPPER(k.Tipo) LIKE :q
-                OR UPPER(k.Referencia) LIKE :q
-                OR UPPER(m.Nombre_medic) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
+                UPPER(k.Lote) LIKE :q ESCAPE '\\'
+                OR UPPER(k.Tipo) LIKE :q ESCAPE '\\'
+                OR UPPER(k.Referencia) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Nombre_medic) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

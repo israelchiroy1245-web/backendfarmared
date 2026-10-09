@@ -44,9 +44,23 @@ export async function obtenerReporteInventario(req, res) {
     try {
         const sucursalId = num(req.query.sucursalId)
         const dias = num(req.query.dias) || 90
+        const { limit, offset } = leerPaginacion(req.query)
 
-        const reporte = await reportesService.reporteInventarioFefo({ sucursalId, diasVencimiento: dias })
-        return res.json({ ok: true, datos: reporte })
+        const pagina = await reportesService.reporteInventarioFefo({
+            sucursalId,
+            diasVencimiento: dias,
+            q: req.query.q,
+            limit,
+            offset,
+        })
+        return res.json({
+            ok: true,
+            datos: pagina.rows,
+            total: pagina.total,
+            filtroDias: pagina.filtroDias,
+            valorEnRiesgo: pagina.valorEnRiesgo,
+            paginacion: respuestaPaginada({ total: pagina.total, limit, offset }),
+        })
     } catch (error) {
         console.error('Error al generar reporte de inventario:', error.message)
         const err = errorOracle(error)
@@ -63,8 +77,9 @@ export async function obtenerReporteCaja(req, res) {
         const sucursalId = num(req.query.sucursalId)
         const desde = req.query.desde || req.query.fechaDesde
         const hasta = req.query.hasta || req.query.fechaHasta
+        const estado = req.query.estado
 
-        const reporte = await reportesService.reporteArqueoCajas({ sucursalId, desde, hasta })
+        const reporte = await reportesService.reporteArqueoCajas({ sucursalId, desde, hasta, estado })
         return res.json({ ok: true, datos: reporte })
     } catch (error) {
         console.error('Error al generar reporte de caja:', error.message)

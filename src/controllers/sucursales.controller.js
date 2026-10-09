@@ -43,9 +43,9 @@ export const listarSucursales = async (req, res) => {
     }
     if (q) {
         sql += ` AND (
-            UPPER(s.Nombre) LIKE :q OR UPPER(s.Codigo) LIKE :q OR UPPER(s.Departamento) LIKE :q
-            OR UPPER(s.Municipio) LIKE :q OR UPPER(NVL(s.Direccion, '')) LIKE :q
-            OR UPPER(s.Tipo) LIKE :q OR UPPER(NVL(s.Telefono, '')) LIKE :q
+            UPPER(s.Nombre) LIKE :q ESCAPE '\\' OR UPPER(s.Codigo) LIKE :q ESCAPE '\\' OR UPPER(s.Departamento) LIKE :q ESCAPE '\\'
+            OR UPPER(s.Municipio) LIKE :q ESCAPE '\\' OR UPPER(NVL(s.Direccion, '')) LIKE :q ESCAPE '\\'
+            OR UPPER(s.Tipo) LIKE :q ESCAPE '\\' OR UPPER(NVL(s.Telefono, '')) LIKE :q ESCAPE '\\'
         )`
         binds.q = q
     }

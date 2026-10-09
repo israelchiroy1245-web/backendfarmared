@@ -59,8 +59,8 @@ export async function consultarMedicamentos({ q, estado, limit, offset }) {
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(m.Nombre_medic) LIKE :q OR UPPER(m.Codigo_barra) LIKE :q
-                OR UPPER(m.Principio_activo) LIKE :q OR UPPER(m.Laboratorio) LIKE :q
+                UPPER(m.Nombre_medic) LIKE :q ESCAPE '\\' OR UPPER(m.Codigo_barra) LIKE :q ESCAPE '\\'
+                OR UPPER(m.Principio_activo) LIKE :q ESCAPE '\\' OR UPPER(m.Laboratorio) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

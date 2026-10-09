@@ -108,12 +108,12 @@ export async function consultarTransferencias({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(so.Nombre) LIKE :q
-                OR UPPER(sd.Nombre) LIKE :q
-                OR UPPER(so.Codigo) LIKE :q
-                OR UPPER(sd.Codigo) LIKE :q
-                OR UPPER(NVL(t.Observacion, '')) LIKE :q
-                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q
+                UPPER(so.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(sd.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(so.Codigo) LIKE :q ESCAPE '\\'
+                OR UPPER(sd.Codigo) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(t.Observacion, '')) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(u.Nombre || ' ' || u.Apellido, '')) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

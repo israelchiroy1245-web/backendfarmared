@@ -18,7 +18,7 @@ export const listarPermisos = async (req, res) => {
              WHERE 1 = 1`
     const binds = {}
     if (q) {
-        sql += ` AND UPPER(p.Nombre) LIKE :q`
+        sql += ` AND UPPER(p.Nombre) LIKE :q ESCAPE '\\'`
         binds.q = q
     }
     sql += ` GROUP BY p.ID, p.Nombre`

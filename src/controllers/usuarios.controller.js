@@ -27,9 +27,9 @@ export const listarUsuarios = async (req, res) => {
     const binds = {}
     if (q) {
         sql += ` AND (
-            UPPER(u.Nombre) LIKE :q OR UPPER(u.Apellido) LIKE :q OR UPPER(u.Email) LIKE :q
-            OR UPPER(u.DPI) LIKE :q OR UPPER(u.Telefono) LIKE :q OR UPPER(r.Nombre) LIKE :q
-            OR UPPER(e.Cargo) LIKE :q OR UPPER(s.Nombre) LIKE :q
+            UPPER(u.Nombre) LIKE :q ESCAPE '\\' OR UPPER(u.Apellido) LIKE :q ESCAPE '\\' OR UPPER(u.Email) LIKE :q ESCAPE '\\'
+            OR UPPER(u.DPI) LIKE :q ESCAPE '\\' OR UPPER(u.Telefono) LIKE :q ESCAPE '\\' OR UPPER(r.Nombre) LIKE :q ESCAPE '\\'
+            OR UPPER(e.Cargo) LIKE :q ESCAPE '\\' OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
         )`
         binds.q = q
     }

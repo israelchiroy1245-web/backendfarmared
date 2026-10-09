@@ -122,12 +122,12 @@ export async function consultarVentas({
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(s.Nombre) LIKE :q
-                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q
-                OR UPPER(NVL(cli.Nombre || ' ' || NVL(cli.Apellido, ''), '')) LIKE :q
-                OR UPPER(v.Numero) LIKE :q
-                OR UPPER(v.Nit) LIKE :q
-                OR UPPER(NVL(v.Nombre_factura, '')) LIKE :q
+                UPPER(s.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(u.Nombre || ' ' || u.Apellido) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(cli.Nombre || ' ' || NVL(cli.Apellido, ''), '')) LIKE :q ESCAPE '\\'
+                OR UPPER(v.Numero) LIKE :q ESCAPE '\\'
+                OR UPPER(v.Nit) LIKE :q ESCAPE '\\'
+                OR UPPER(NVL(v.Nombre_factura, '')) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }

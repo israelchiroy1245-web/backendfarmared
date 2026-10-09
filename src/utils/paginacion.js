@@ -22,7 +22,10 @@ export function respuestaPaginada({ total, limit, offset }) {
 
 /** Texto de búsqueda para LIKE. Vacío si no hay término. */
 export function terminoLike(q) {
-    const clean = String(q || '').trim().toUpperCase().replace(/[%_\\]/g, '')
+    const clean = String(q || '').trim().toUpperCase()
+        .replace(/\\/g, '\\\\')
+        .replace(/%/g, '\\%')
+        .replace(/_/g, '\\_')
     if (!clean) return null
     return `%${clean}%`
 }

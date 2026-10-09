@@ -26,7 +26,7 @@ router.get('/caja', requireRol('ADMIN', 'AUDITOR'), obtenerReporteCaja)
 router.get('/planilla', requireRol('ADMIN', 'AUDITOR'), obtenerReportePlanilla)
 router.get('/activos', requireRol('ADMIN', 'AUDITOR', 'QF'), obtenerReporteActivos)
 router.get('/kardex', requireRol('ADMIN', 'AUDITOR', 'QF'), obtenerReporteKardex)
-router.get('/auditoria', requireRol('ADMIN', 'AUDITOR'), obtenerReporteAuditoria)
+router.get('/auditoria', requireRol('ADMIN', 'AUDITOR', 'QF'), obtenerReporteAuditoria)
 router.get('/ventas', requireRol('ADMIN', 'AUDITOR', 'QF'), obtenerReporteVentas)
 router.get('/inventario', requireRol('ADMIN', 'AUDITOR', 'QF'), obtenerReporteInventario)
 

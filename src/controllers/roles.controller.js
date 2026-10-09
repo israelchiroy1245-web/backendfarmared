@@ -21,7 +21,7 @@ export const listarRoles = async (req, res) => {
              WHERE 1 = 1`
     const binds = {}
     if (q) {
-        sql += ` AND (UPPER(r.Nombre) LIKE :q OR UPPER(NVL(r.Descripcion, '')) LIKE :q)`
+        sql += ` AND (UPPER(r.Nombre) LIKE :q ESCAPE '\\' OR UPPER(NVL(r.Descripcion, '')) LIKE :q ESCAPE '\\')`
         binds.q = q
     }
     sql += ` GROUP BY r.ID, r.Nombre, r.Descripcion`

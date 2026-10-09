@@ -59,9 +59,9 @@ export async function consultarCompras({ sucursalId, proveedorId, fechaDesde, fe
         const busqueda = terminoLike(q)
         if (busqueda) {
             sql += ` AND (
-                UPPER(c.Numero_Factura) LIKE :q
-                OR UPPER(p.Nombre) LIKE :q
-                OR UPPER(s.Nombre) LIKE :q
+                UPPER(c.Numero_Factura) LIKE :q ESCAPE '\\'
+                OR UPPER(p.Nombre) LIKE :q ESCAPE '\\'
+                OR UPPER(s.Nombre) LIKE :q ESCAPE '\\'
             )`
             binds.q = busqueda
         }
