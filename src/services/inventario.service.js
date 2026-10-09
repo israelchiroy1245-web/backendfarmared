@@ -2,6 +2,7 @@ import { oracledb } from '../config/database.js'
 import { setUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+import { assertMedicamentoActivo } from './medicamentos.service.js'
 
 /**
  * Consulta de inventario/lotes con detalles de medicamento y sucursal
@@ -245,6 +246,7 @@ export async function crearLote({
     try {
         conn = await oracledb.getConnection()
         await setUsuario(conn, usuarioId)
+        await assertMedicamentoActivo(conn, medicamentoId)
 
         // Verificar existencia previa del lote en la sucursal
         const check = await conn.execute(

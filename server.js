@@ -50,6 +50,9 @@ app.use('/api/compras', comprasRoutes)
 import proveedoresRoutes from './src/routes/proveedores.routes.js'
 app.use('/api/proveedores', proveedoresRoutes)
 
+import medicamentosRoutes from './src/routes/medicamentos.routes.js'
+app.use('/api/medicamentos', medicamentosRoutes)
+
 //Rutas de Caja & Turnos (Módulo 4) — antes que el POS
 import cajaRoutes from './src/routes/caja.routes.js'
 app.use('/api/caja', cajaRoutes)

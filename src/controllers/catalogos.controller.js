@@ -55,7 +55,8 @@ export async function catalogoMedicamentos(_req, res) {
                 Receta_requerida AS "RECETA_REQUERIDA", 
                 Precio_venta AS "PRECIO_VENTA", 
                 Costo AS "COSTO"
-             FROM F_Medicamentos 
+             FROM F_Medicamentos
+             WHERE Estado = 'ACTIVO'
              ORDER BY Nombre_medic ASC`
         )
         return res.json({ ok: true, total: result.rows?.length || 0, datos: result.rows || [] })

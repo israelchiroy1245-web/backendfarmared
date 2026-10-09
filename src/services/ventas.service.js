@@ -2,6 +2,7 @@ import { oracledb } from '../config/database.js'
 import { setUsuario, empleadoActivoDeUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+import { assertMedicamentoActivo } from './medicamentos.service.js'
 
 /**
  * Consulta listado de ventas con filtros y paginación
@@ -245,6 +246,35 @@ export async function consultarVentaPorId(id) {
  * 5. Registra los pagos en F_Venta_pago (3FN)
  * 6. Aplica venta a caja (movimiento de caja, acumulación en turno, cálculo de vuelto) con aplicar_venta_a_caja
  */
+function normalizarPagos(pagos) {
+    if (!Array.isArray(pagos) || pagos.length === 0) {
+        const err = new Error('Indique efectivo, tarjeta o transferencia')
+        err.statusCode = 400
+        throw err
+    }
+    const lista = []
+    for (const p of pagos) {
+        const metodo = String(p.metodoPago || p.metodo || '').toUpperCase().trim()
+        const monto = num(p.monto)
+        if (!['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].includes(metodo)) {
+            const err = new Error('Indique efectivo, tarjeta o transferencia')
+            err.statusCode = 400
+            throw err
+        }
+        if (!monto || monto <= 0) {
+            const err = new Error('El monto de cada pago debe ser mayor a 0')
+            err.statusCode = 400
+            throw err
+        }
+        lista.push({
+            metodo,
+            monto,
+            referencia: p.referencia ? String(p.referencia).trim() : null,
+        })
+    }
+    return lista
+}
+
 export async function emitirVenta({
     sucursalId,
     turnoId,
@@ -258,11 +288,11 @@ export async function emitirVenta({
     precio,
     lineas,
     pagos,
-    metodoPago = 'EFECTIVO',
     montoRecibido,
     usuarioId,
     rol
 }) {
+    const listaPagos = normalizarPagos(pagos)
     let conn
     try {
         conn = await oracledb.getConnection()
@@ -446,6 +476,7 @@ export async function emitirVenta({
 
         // 8. Procesar descuento FEFO por cada ítem usando procesar_venta
         for (const item of itemsAProcesar) {
+            await assertMedicamentoActivo(conn, item.medicamentoId)
             await conn.execute(
                 `BEGIN
                     procesar_venta(
@@ -474,42 +505,11 @@ export async function emitirVenta({
         const cabeceraCalculada = resTotalVenta.rows?.[0] || { SUBTOTAL: 0, IVA: 0, TOTAL: 0 }
         const totalVenta = Number(cabeceraCalculada.TOTAL)
 
-        // 10. Normalizar e insertar formas de pago en F_Venta_pago (3FN)
-        const listaPagos = []
-        if (Array.isArray(pagos) && pagos.length > 0) {
-            for (const p of pagos) {
-                const metodo = String(p.metodoPago || p.metodo || 'EFECTIVO').toUpperCase().trim()
-                const monto = num(p.monto)
-                if (!['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].includes(metodo)) {
-                    const err = new Error(`Método de pago no válido: ${metodo}`)
-                    err.statusCode = 400
-                    throw err
-                }
-                if (!monto || monto <= 0) {
-                    const err = new Error('El monto de cada pago debe ser mayor a 0')
-                    err.statusCode = 400
-                    throw err
-                }
-                listaPagos.push({
-                    metodo,
-                    monto,
-                    referencia: p.referencia ? String(p.referencia).trim() : null
-                })
-            }
-        } else {
-            // Un solo pago por defecto con metodoPago provisto o deducido
-            const metodoUnico = String(metodoPago || 'EFECTIVO').toUpperCase().trim()
-            if (!['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].includes(metodoUnico)) {
-                const err = new Error(`Método de pago no válido: ${metodoUnico}`)
-                err.statusCode = 400
-                throw err
-            }
-            // En efectivo se registra el total exacto de la venta (el excedente es vuelto)
-            listaPagos.push({
-                metodo: metodoUnico,
-                monto: totalVenta,
-                referencia: null
-            })
+        // 10. Insertar formas de pago en F_Venta_pago (3FN). Sin pagos no se cobra.
+        if (listaPagos.reduce((suma, p) => suma + p.monto, 0) + 0.001 < totalVenta) {
+            const err = new Error('Los pagos no cubren el total del ticket')
+            err.statusCode = 400
+            throw err
         }
 
         // Insertar cada pago en F_Venta_pago

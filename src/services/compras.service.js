@@ -2,6 +2,7 @@ import { oracledb } from '../config/database.js'
 import { setUsuario, empleadoActivoDeUsuario } from './sesion.js'
 import { num, nbind } from '../utils/oracle.js'
 import { ejecutarPagina, terminoLike } from '../utils/paginacion.js'
+import { assertMedicamentoActivo } from './medicamentos.service.js'
 
 /**
  * Listado de compras con filtros
@@ -257,6 +258,7 @@ export async function registrarCompra({
                 err.statusCode = 400
                 throw err
             }
+            await assertMedicamentoActivo(conn, medId)
 
             // Llamar al procedimiento almacenado de Oracle
             await conn.execute(
